@@ -9,6 +9,7 @@ import (
 	git "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
+	"github.com/go-git/go-git/v6/utils/merkletrie"
 )
 
 type Repository struct {
@@ -27,12 +28,12 @@ func (r *Repository) Changes(commits ...string) ([]Change, error) {
 	for _, c := range commits {
 		h, err := r.inner.ResolveRevision(plumbing.Revision(c))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("resolve revision %s: %w", c, err)
 		}
 
 		change, err := r.changed(*h)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("get changes (%s): %w", *h, err)
 		}
 
 		changes = append(changes, change)
@@ -45,7 +46,7 @@ func (r *Repository) Changes(commits ...string) ([]Change, error) {
 func (r *Repository) changed(h plumbing.Hash) (Change, error) {
 	c, err := r.inner.CommitObject(h)
 	if err != nil {
-		return Change{}, err
+		return Change{}, fmt.Errorf("read commit %s: %w", h, err)
 	}
 
 	if c.NumParents() > 1 {
@@ -56,54 +57,67 @@ func (r *Repository) changed(h plumbing.Hash) (Change, error) {
 		return Change{}, fmt.Errorf("range includes a merge commit (%s), not continuing", h)
 	}
 
-	fmt.Printf("%s %s\n", c.Hash, strings.Split(c.Message, "\n")[0])
+	headline, body, _ := strings.Cut(c.Message, "\n")
 
-	message := fmt.Sprintf("%s\nCo-authored-by: %s <%s>", c.Message, c.Author.Name, c.Author.Email)
-
-	fmt.Println(message)
+	if body != "" {
+		body = "\n"
+	}
+	body = fmt.Sprintf("%sCo-authored-by: %s <%s>", body, c.Author.Name, c.Author.Email)
 
 	input := Change{
-		Message: message,
-		Changes: map[string][]byte{},
+		hash:     h.String(),
+		Headline: headline,
+		Body:     body,
+		Changes:  map[string][]byte{},
 	}
 
 	tree, err := c.Tree()
 	if err != nil {
-		return input, fmt.Errorf("commit.tree(%s): %w", h, err)
+		return input, fmt.Errorf("get tree %s: %w", h, err)
 	}
 
 	parent, err := c.Parent(0)
 	if err != nil {
-		return input, fmt.Errorf("commit.parent(%s): %w", h, err)
+		return input, fmt.Errorf("get parent %s: %w", h, err)
 	}
 
 	ptree, err := parent.Tree()
 	if err != nil {
-		return input, fmt.Errorf("commit.parent.tree(%s): %w", h, err)
+		return input, fmt.Errorf("get parent tree %s: %w", h, err)
 	}
 
 	diff, err := ptree.Diff(tree)
 	if err != nil {
-		return input, fmt.Errorf("tree.diff(%s): %w", h, err)
+		return input, fmt.Errorf("compute diff %s: %w", h, err)
 	}
 
-	fmt.Printf("  changed files: %d\n", len(diff))
-
-	// Each change in the diff represents one file. We don't really care if it modified,
-	// created, or removed a file, we just need the set of names so we can get the contents
-	// of the file in the current tree. If there are no contents, it's a deletion.
 	for _, change := range diff {
-		deleted := false
-		name := change.To.Name
-		if name == "" {
-			name = change.From.Name
+		action, err := change.Action()
+		if err != nil {
+			return input, fmt.Errorf("get change type %s: %w", h, err)
 		}
 
+		if action == merkletrie.Delete {
+			input.Changes[change.From.Name] = []byte{}
+			continue
+		}
+
+		// This is a rename, which is a delete on the old name and a modify on the new name
+		// so we mark the from as a delete but continue execution
+		if change.From.Name != "" && change.From.Name != change.To.Name {
+			input.Changes[change.From.Name] = []byte{}
+		}
+
+		name := change.To.Name
+
 		f, err := tree.File(name)
+		// XXX: This shouldn't happen, as it implies the file was deleted but we would have caught
+		// that in the action block above.
 		if errors.Is(err, object.ErrFileNotFound) {
-			deleted = true
+			input.Changes[name] = []byte{}
+			continue
 		} else if err != nil {
-			return input, fmt.Errorf("tree.file(%s -> %s): %w", h, name, err)
+			return input, fmt.Errorf("get file %s -> %s: %w", h, name, err)
 		}
 
 		// contents are in f.Contents, or f.Reader
@@ -111,19 +125,17 @@ func (r *Repository) changed(h plumbing.Hash) (Change, error) {
 		// we don't need to encode ourselves
 		r, err := f.Reader()
 		if err != nil {
-			return input, fmt.Errorf("file.reader(%s -> %s): %w", h, name, err)
+			return input, fmt.Errorf("read file %s -> %s: %w", h, name, err)
 		}
 
 		content, err := io.ReadAll(r)
 		if err != nil {
-			return input, fmt.Errorf("file.reader.read(%s -> %s): %w", h, name, err)
+			return input, fmt.Errorf("read file content %s -> %s: %w", h, name, err)
 		}
 
 		r.Close()
 
 		input.Changes[name] = content
-
-		fmt.Printf("  %s deleted=%t size=%d\n", name, deleted, f.Size)
 	}
 
 	return input, nil

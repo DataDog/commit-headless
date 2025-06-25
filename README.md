@@ -9,7 +9,7 @@ mutation.
 When this API is used with a GitHub App token, the resulting commit will be signed and verified by
 GitHub on behalf of the application.
 
-[mutation]: https://docs.github.com/en/graphql/reference/mutations#createcommitonbranch)
+[mutation]: https://docs.github.com/en/graphql/reference/mutations#createcommitonbranch
 
 ## Usage
 
@@ -25,13 +25,16 @@ original commit message. This is because commits created using the GraphQL API d
 setting the author or committer (they are inferred from the token owner), so adding a
 "Co-authored-by" trailer allows the commits to carry attribution to the original (bot) committer.
 
+In normal usage, `commit-headless` will print *only* the reference to the last commit created on the
+remote, allowing this to easily be captured in a script. For example output, see the later section.
+
 You can use `commit-headless push` via:
 
-    GH_TOKEN=xyz commit-headless push -R datadog/commit-headless -b bot-branch-remote HASH1 HASH2 HASH3 ...
+    GH_TOKEN=xyz commit-headless push -R datadog/commit-headless --branch bot-branch-remote HASH1 HASH2 HASH3 ...
 
 Or, using git log (note `--oneline`):
 
-    git log --oneline main.. | GH_TOKEN=xyz commit-headless push -R datadog/commit-headless -b bot-branch-remote
+    git log --oneline main.. | GH_TOKEN=xyz commit-headless push -R datadog/commit-headless --branch bot-branch-remote
 
 ## Try it!
 
@@ -40,3 +43,39 @@ The commits on `bot-branch-remote` in this repository were entirely created via 
 local commits created like so:
 
     git commit --no-gpg-sign --author='Bot <bot@mailinator.com>'
+
+## Example output
+
+The below output was generated from `commit-headless` running on some local commits to the
+`bot-branch-remote` branch.
+
+All output other than the final commit hash printed at the end is written to stderr, and can be
+redirected to a file.
+
+```sh
+Owner: datadog
+Repository: commit-headless
+Branch: bot-branch-remote
+Commits: 7e94985, 89c7296, b89e749, 9a1a616
+Current head commit: 84485a25ea7cac03d42eb1571d4d46974ade837b
+Commit 7e94985979a76a9ef72248007c118dc565bc5715
+  Headline: bot: update README.md
+  Changed files: 1
+    - MODIFY: README.md
+Commit 89c7296eafeefb6165edf0b27e8b287f4695724e
+  Headline: bot: add botfile.txt
+  Changed files: 1
+    - MODIFY: botfile.txt
+Commit b89e7494601c5f001bf923386edc4e9cf7d8ec76
+  Headline: bot: remove botfile.txt
+  Changed files: 1
+    - DELETE: botfile.txt
+Commit 9a1a616c80c44b228e2890b811490a40beb198b9
+  Headline: bot: rename README.md -> README.markdown
+  Changed files: 2
+    - DELETE: README.md
+    - MODIFY: README.markdown
+Pushed 4 commits.
+Branch URL: https://github.com/datadog/commit-headless/commits/bot-branch-remote
+281ff0fa1204e93c8931a774c6ebe2c69e66eddd
+```

@@ -7,15 +7,18 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"golang.org/x/oauth2"
 )
 
 // Change represents a change in a given commit.
 type Change struct {
-	// Message is the commit message
-	Message string
+	hash string
+
+	// Headline is the first line of the commit message
+	Headline string
+	// Body is the rest of the commit message
+	Body string
 
 	// Changes is a map of path to file contents.
 	// Deleted files will map to nil contents or an empty byte slice.
@@ -52,6 +55,10 @@ func (c *Client) branchURL() string {
 	return fmt.Sprintf("%s/repos/%s/%s/branches/%s", c.baseURL, c.owner, c.repo, c.branch)
 }
 
+func (c *Client) browseCommitsURL() string {
+	return fmt.Sprintf("https://github.com/%s/%s/commits/%s", c.owner, c.repo, c.branch)
+}
+
 func (c *Client) graphqlURL() string {
 	return fmt.Sprintf("%s/graphql", c.baseURL)
 }
@@ -60,12 +67,12 @@ func (c *Client) graphqlURL() string {
 func (c *Client) GetHeadCommitHash(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.branchURL(), nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("prepare http request: %w", err)
 	}
 
 	resp, err := c.httpC.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("get commit hash: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -80,7 +87,7 @@ func (c *Client) GetHeadCommitHash(ctx context.Context) (string, error) {
 	}{}
 
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return "", err
+		return "", fmt.Errorf("decode commit hash response: %w", err)
 	}
 
 	return payload.Commit.Sha, nil
@@ -89,26 +96,24 @@ func (c *Client) GetHeadCommitHash(ctx context.Context) (string, error) {
 // PushChanges takes a list of changes and a commit hash and produces commits using the GitHub GraphQL API.
 // The commit hash is expected to be the current head of the remote branch, see [GetHeadCommitHash]
 // for more.
-// It returns the number of changes that were successfully pushed and any error encountered.
-func (c *Client) PushChanges(ctx context.Context, headCommit string, changes ...Change) (int, error) {
+// It returns the number of changes that were successfully pushed, the new head reference hash, and
+// any error encountered.
+func (c *Client) PushChanges(ctx context.Context, headCommit string, changes ...Change) (int, string, error) {
 	var err error
 	for i, change := range changes {
 		headCommit, err = c.PushChange(ctx, headCommit, change)
 		if err != nil {
-			return i, err
+			return i + 1, "", fmt.Errorf("push change %d: %w", i+i, err)
 		}
-		fmt.Printf("pushed %d of %d commits, new head: %s\n", i+1, len(changes), headCommit)
 	}
 
-	return len(changes), nil
+	return len(changes), headCommit, nil
 }
 
 // PushChange pushes a single change using the GraphQL API.
 // It returns the hash of the pushed commit or an error.
 func (c *Client) PushChange(ctx context.Context, headCommit string, change Change) (string, error) {
 	// Turn the change into a createCommitOnBranchInput
-	headline, body, _ := strings.Cut(change.Message, "\n")
-
 	added := []fileChange{}
 	deleted := []fileChange{}
 
@@ -132,8 +137,8 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 		},
 		ExpectedRef: headCommit,
 		Message: commitInputMessage{
-			Headline: headline,
-			Body:     body,
+			Headline: change.Headline,
+			Body:     change.Body,
 		},
 		Changes: commitInputChanges{
 			Additions: added,
@@ -157,12 +162,12 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 	// Encode the query to JSON (so we can print it in case of an error)
 	queryJSON, err := json.Marshal(query)
 	if err != nil {
-		return "", fmt.Errorf("marshal mutation: %w", err)
+		return "", fmt.Errorf("encode mutation: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.graphqlURL(), bytes.NewReader(queryJSON))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("prepare mutation request: %w", err)
 	}
 
 	resp, err := c.httpC.Do(req)
@@ -185,7 +190,7 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 	}{}
 
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return "", fmt.Errorf("decode response body: %w", err)
+		return "", fmt.Errorf("decode mutation response body: %w", err)
 	}
 
 	if len(payload.Errors) != 0 {
@@ -195,7 +200,7 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 		for i, e := range payload.Errors {
 			fmt.Printf("Error %d: %s\n", i+1, e.Message)
 		}
-		return "", errors.New("graphql error")
+		return "", errors.New("graphql response")
 	}
 
 	return payload.Data.CreateCommitOnBranch.Commit.ObjectID, nil
