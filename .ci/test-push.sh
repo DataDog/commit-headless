@@ -44,7 +44,7 @@ git commit -m"commit from commit-headless ${CI_COMMIT_SHORT_SHA}"
 REV=$(git rev-parse HEAD)
 
 # And use commit-headless-dev to push it to the remote branch
-GH_TOKEN=$(STS_TOKEN) /tmp/commit-headless-dev push -R DataDog/commit-headless --branch "${BRANCH}" "${REV}"
+GH_TOKEN="${STS_TOKEN}" /tmp/commit-headless-dev push -R DataDog/commit-headless --branch "${BRANCH}" "${REV}"
 
 # Finally, delete the branch on the GitHub side
 
