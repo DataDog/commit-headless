@@ -1,0 +1,31 @@
+variables:
+  DOCKER_IMAGE: "registry.ddbuild.io/docker:24.0.4-gbi-focal"
+  CI_IMAGE_REPO: "registry.ddbuild.io/ci/commit-headless"
+  CI_IMAGE_TAG: "latest"
+  CI_IMAGE: "${CI_IMAGE_REPO}:${CI_IMAGE_TAG}"
+
+stages:
+  - build
+  - test
+  - publish
+
+default:
+  tags: ["arch:amd64"]
+  image: ${CI_IMAGE}
+  before_script:
+    - git config --global url."https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.ddbuild.io/DataDog/".insteadOf "https://github.com/DataDog/"
+    - git config --global --add safe.directory $PWD
+
+build-ci-image:
+  when: manual
+  image: ${DOCKER_IMAGE}
+  stage: build
+  script:
+    - METADATA_FILE=$(mktemp)
+    - tag="${CI_IMAGE_REPO}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}"
+    - docker buildx build --tag ${tag} --label target=build --push --metadata-file ${METADATA_FILE} Dockerfile.ci
+    - ddsign sign "${tag}" --docker-metadata-file ${METADATA_FILE}
+
+.only-main: &only-main
+ - if: '$CI_COMMIT_BRANCH == "main"'
+   when: always

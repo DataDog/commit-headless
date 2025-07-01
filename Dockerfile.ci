@@ -1,0 +1,24 @@
+FROM registry.ddbuild.io/images/base/gbi-ubuntu_2204:release AS ci
+
+USER root
+
+# Updating dd-octo-sts:
+#   Find latest release: crane ls registry.ddbuild.io/dd-octo-sts
+#   Get the digest: crane digest registry.ddbuild.io/dd-octo-sts:v1.8.2
+COPY --from=registry.ddbuild.io/dd-octo-sts:v1.8.2@sha256:4030e6e77a531dcbcbbd2089d37e7f1e52177ddd7398dd48f4ec95aa60346317 \
+    /usr/local/bin/dd-octo-sts /usr/local/bin/dd-octo-sts
+
+RUN clean-apt install \
+    git=1:2.34.1-1ubuntu1.12
+
+ENV GO_VERSION="1.24.0"
+RUN  curl -sSL https://binaries.ddbuild.io/golang/go${GO_VERSION}.linux-amd64.tar.gz -o /tmp/go.tar.gz \
+    && tar -xzvf /tmp/go.tar.gz -C /usr/local/bin go
+
+ENV GOROOT=/usr/local/bin/go
+ENV GOBIN=$GOROOT/bin
+ENV PATH=$PATH:$GOBIN
+
+# Make sure we don't run as root by default
+USER dog
+WORKDIR /home/dog
