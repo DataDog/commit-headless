@@ -23,6 +23,8 @@ pushd "${TREE}"
 
 git switch --orphan "${BRANCH}"
 
+source "${GITLAB_ENV}"
+
 # Add github as a remote
 git remote add github "https://anyuser:${STS_TOKEN}@github.com/DataDog/commit-headless.git"
 
