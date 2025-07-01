@@ -39,7 +39,7 @@ build-ci-image:
   needs: [test]
   stage: test
   id_tokens:
-    DDOCTO_STS_ID_TOKEN:
+    DDOCTOSTS_ID_TOKEN:
       aud: dd-octo-sts
 
   before_script:
