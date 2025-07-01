@@ -23,7 +23,7 @@ build-ci-image:
   script:
     - METADATA_FILE=$(mktemp)
     - tag="${CI_IMAGE_REPO}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}"
-    - docker buildx build --tag ${tag} --label target=build --push --metadata-file ${METADATA_FILE} Dockerfile.ci
+    - docker buildx build --tag ${tag} --label target=build --push --metadata-file ${METADATA_FILE} --file Dockerfile.ci .
     - ddsign sign "${tag}" --docker-metadata-file ${METADATA_FILE}
 
 .only-main: &only-main
