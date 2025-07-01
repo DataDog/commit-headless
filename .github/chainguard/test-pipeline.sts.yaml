@@ -8,7 +8,7 @@ subject_pattern: 'project_path:DataDog/commit-headless:ref_type:branch:ref:[\w\-
 # checks to reduce duplication.
 claim_pattern:
   ref_protected: "true"
-  pipeline_source: "push"
+  pipeline_source: 'push|api'
   # Only allow this policy to pipelines defined in the root .gitlab-ci.yml
   ci_config_ref_uri: 'gitlab\.ddbuild\.io/DataDog/commit-headless//\.gitlab-ci\.ya?ml@.*'
 
