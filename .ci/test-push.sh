@@ -7,7 +7,6 @@ IFS=$'\n\t'
 # then pushing that new commit with commit-headless and asserting that it completed without error.
 
 TREE=$(mktemp -d)
-AUTHOR="Gitlab CI <${CI_PIPELINE_ID}@gitlab.ddbuild.io>"
 BRANCH="test-pipeline/${CI_PIPELINE_ID}"
 
 # First, build commit-headless and store the binary somewhere we can use it
@@ -15,6 +14,9 @@ go build -o /tmp/commit-headless-dev -buildvcs=false .
 
 # Copied from default.before_script
 git config --global --add safe.directory $PWD
+
+git config user.name "Gitlab CI"
+git config user.email "${CI_PIPELINE_ID}@gitlab.ddbuild.io"
 
 # Create a detached worktree in our working directory, switch to it, and create an orphaned branch
 git worktree add -d "${TREE}"
@@ -29,14 +31,14 @@ source "${GITLAB_ENV}"
 git remote add github "https://anyuser:${STS_TOKEN}@github.com/DataDog/commit-headless.git"
 
 # Create and push an initial commit, which will create the branch on the GitHub side
-git commit --author="${AUTHOR}" --allow-empty -m"initial commit"
+git commit --allow-empty -m"initial commit"
 
 git push --set-upstream github "${BRANCH}"
 
 # Create a commit
 echo "pipeline: ${CI_PIPELINE_ID}" >> pipeline.txt
 git add pipeline.txt
-git commit --author="${AUTHOR}" -m"commit from commit-headless ${CI_COMMIT_SHORT_SHA}"
+git commit -m"commit from commit-headless ${CI_COMMIT_SHORT_SHA}"
 
 # Get the revision for this commit
 REV=$(git rev-parse HEAD)
