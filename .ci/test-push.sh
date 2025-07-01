@@ -13,6 +13,9 @@ BRANCH="test-pipeline/${CI_PIPELINE_ID}"
 # First, build commit-headless and store the binary somewhere we can use it
 go build -o /tmp/commit-headless-dev -buildvcs=false .
 
+# Copied from default.before_script
+git config --global --add safe.directory $PWD
+
 # Create a detached worktree in our working directory, switch to it, and create an orphaned branch
 git worktree add -d "${TREE}"
 
@@ -38,5 +41,7 @@ REV=$(git rev-parse HEAD)
 
 # And use commit-headless-dev to push it to the remote branch
 /tmp/commit-headless-dev push -R DataDog/commit-headless --branch "${BRANCH}" "${REV}"
+
+# Finally, delete the branch on the GitHub side
 
 popd
