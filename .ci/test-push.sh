@@ -11,7 +11,7 @@ AUTHOR="Gitlab CI <${CI_PIPELINE_ID}@gitlab.ddbuild.io>"
 BRANCH="test-pipeline/${CI_PIPELINE_ID}"
 
 # First, build commit-headless and store the binary somewhere we can use it
-go build -o /tmp/commit-headless-dev .
+go build -o /tmp/commit-headless-dev -buildvcs=false .
 
 # Create a detached worktree in our working directory, switch to it, and create an orphaned branch
 git worktree add -d "${TREE}"
