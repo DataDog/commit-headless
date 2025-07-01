@@ -15,7 +15,8 @@ func log(f string, args ...any) {
 }
 
 var CLI struct {
-	Push PushCmd `cmd:"" help:"Push local commits to the remote."`
+	Push    PushCmd    `cmd:"" help:"Push local commits to the remote."`
+	Version VersionCmd `cmd:"" help:"Print version information and quit."`
 }
 
 func main() {
