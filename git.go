@@ -57,11 +57,12 @@ func (r *Repository) changed(h plumbing.Hash) (Change, error) {
 		return Change{}, fmt.Errorf("range includes a merge commit (%s), not continuing", h)
 	}
 
-	headline, body, _ := strings.Cut(c.Message, "\n")
+	headline, body, _ := strings.Cut(strings.TrimSpace(c.Message), "\n")
 
 	if body != "" {
-		body = "\n"
+		body += "\n\n"
 	}
+
 	body = fmt.Sprintf("%sCo-authored-by: %s <%s>", body, c.Author.Name, c.Author.Email)
 
 	input := Change{
@@ -76,14 +77,19 @@ func (r *Repository) changed(h plumbing.Hash) (Change, error) {
 		return input, fmt.Errorf("get tree %s: %w", h, err)
 	}
 
-	parent, err := c.Parent(0)
-	if err != nil {
-		return input, fmt.Errorf("get parent %s: %w", h, err)
-	}
+	var ptree *object.Tree
+	if c.NumParents() == 1 {
+		parent, err := c.Parent(0)
+		if err != nil {
+			return input, fmt.Errorf("get parent %s: %w", h, err)
+		}
 
-	ptree, err := parent.Tree()
-	if err != nil {
-		return input, fmt.Errorf("get parent tree %s: %w", h, err)
+		ptree, err = parent.Tree()
+		if err != nil {
+			return input, fmt.Errorf("get parent tree %s: %w", h, err)
+		}
+	} else {
+		ptree = &object.Tree{}
 	}
 
 	diff, err := ptree.Diff(tree)
@@ -110,33 +116,42 @@ func (r *Repository) changed(h plumbing.Hash) (Change, error) {
 
 		name := change.To.Name
 
-		f, err := tree.File(name)
-		// XXX: This shouldn't happen, as it implies the file was deleted but we would have caught
-		// that in the action block above.
-		if errors.Is(err, object.ErrFileNotFound) {
-			input.Changes[name] = []byte{}
-			continue
-		} else if err != nil {
-			return input, fmt.Errorf("get file %s -> %s: %w", h, name, err)
-		}
-
-		// contents are in f.Contents, or f.Reader
-		// since we transmit as bytes and the json encoder already base64 encodes byte strings,
-		// we don't need to encode ourselves
-		r, err := f.Reader()
+		content, err := fileContents(tree, name)
 		if err != nil {
-			return input, fmt.Errorf("read file %s -> %s: %w", h, name, err)
+			return input, err
 		}
-
-		content, err := io.ReadAll(r)
-		if err != nil {
-			return input, fmt.Errorf("read file content %s -> %s: %w", h, name, err)
-		}
-
-		r.Close()
 
 		input.Changes[name] = content
 	}
 
 	return input, nil
+}
+
+// fileContents takes an object.Tree and filename and returns the contents of the file, if any
+func fileContents(t *object.Tree, name string) ([]byte, error) {
+	f, err := t.File(name)
+	// XXX: This shouldn't happen, as it implies the file was deleted but we would have caught
+	// that in the action block above.
+	if errors.Is(err, object.ErrFileNotFound) {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("get file %s: %w", name, err)
+	}
+
+	// contents are in f.Contents, or f.Reader
+	// since we transmit as bytes and the json encoder already base64 encodes byte strings,
+	// we don't need to encode ourselves
+	r, err := f.Reader()
+	if err != nil {
+		return nil, fmt.Errorf("read file %s: %w", name, err)
+	}
+
+	content, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("read file content %s: %w", name, err)
+	}
+
+	r.Close()
+
+	return content, nil
 }
