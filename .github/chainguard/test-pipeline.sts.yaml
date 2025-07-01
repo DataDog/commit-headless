@@ -1,0 +1,17 @@
+issuer: https://gitlab.ddbuild.io
+
+# Allow this policy for pipelines on any branch of this repository
+subject_pattern: 'project_path:DataDog/commit-headless:ref_type:branch:ref:[\w\-\_\/]+'
+
+# For information about the claims, see: https://docs.gitlab.com/ci/secrets/id_token_authentication/
+# Note that some claims that are covered in the subject pattern above are elided from the claim
+# checks to reduce duplication.
+claim_pattern:
+  ref_protected: "true"
+  pipeline_source: "push"
+  # Only allow this policy to pipelines defined in the root .gitlab-ci.yml
+  ci_config_ref_uri: 'gitlab\.ddbuild\.io/DataDog/commit-headless//\.gitlab-ci\.ya?ml@.*'
+
+# The test pipeline needs to be able to write to the repository in order to create commits
+permissions:
+  contents: write
