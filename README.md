@@ -30,11 +30,11 @@ remote, allowing this to easily be captured in a script. For example output, see
 
 You can use `commit-headless push` via:
 
-    GH_TOKEN=xyz commit-headless push -R datadog/commit-headless --branch bot-branch-remote HASH1 HASH2 HASH3 ...
+    GH_TOKEN=xyz commit-headless push --target datadog/commit-headless --branch bot-branch-remote HASH1 HASH2 HASH3 ...
 
 Or, using git log (note `--oneline`):
 
-    git log --oneline main.. | GH_TOKEN=xyz commit-headless push -R datadog/commit-headless --branch bot-branch-remote
+    git log --oneline main.. | GH_TOKEN=xyz commit-headless push --target datadog/commit-headless --branch bot-branch-remote
 
 ## Try it!
 

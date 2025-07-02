@@ -17,6 +17,8 @@ type Repository struct {
 }
 
 // Open opens and returns a Repository in the current working directory
+// TODO: Not sure if/how to open a path to a git worktree specifically, or how to detect that the
+// path points to a worktree. Either make it work or make it a clear error.
 func Open(path string) (*Repository, error) {
 	r, err := git.PlainOpen(path)
 	return &Repository{inner: r}, err
@@ -85,7 +87,12 @@ func (r *Repository) changed(h plumbing.Hash) (Change, error) {
 		}
 
 		ptree, err = parent.Tree()
-		if err != nil {
+		if errors.Is(err, plumbing.ErrObjectNotFound) {
+			// parent may not have a tree if the first commit was an empty commit
+			// just treat it as a nil tree
+			// TODO: test case here
+			ptree = &object.Tree{}
+		} else if err != nil {
 			return input, fmt.Errorf("get parent tree %s: %w", h, err)
 		}
 	} else {

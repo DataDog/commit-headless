@@ -1,13 +1,10 @@
 variables:
   DOCKER_IMAGE: "registry.ddbuild.io/docker:24.0.4-gbi-focal"
   CI_IMAGE_REPO: "registry.ddbuild.io/ci/commit-headless"
-  CI_IMAGE_TAG: "latest"
+  # Built on main commit 887ca009df25f0f20054dcb9cde962a8fc918ce6
+  # via: https://gitlab.ddbuild.io/DataDog/commit-headless/-/jobs/1008535804
+  CI_IMAGE_TAG: "v69355779-887ca009@sha256:5f54925e98f1961dd7476eae8faba387efbdc7fa78ce1b515c828e9bf583a1fd"
   CI_IMAGE: "${CI_IMAGE_REPO}:${CI_IMAGE_TAG}"
-
-stages:
-  - build
-  - test
-  - publish
 
 default:
   tags: ["arch:amd64"]
@@ -19,13 +16,38 @@ default:
 build-ci-image:
   when: manual
   image: ${DOCKER_IMAGE}
-  stage: build
+  stage: .pre
   script:
     - METADATA_FILE=$(mktemp)
     - tag="${CI_IMAGE_REPO}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}"
     - docker buildx build --tag ${tag} --label target=build --push --metadata-file ${METADATA_FILE} --file Dockerfile.ci .
     - ddsign sign "${tag}" --docker-metadata-file ${METADATA_FILE}
 
-.only-main: &only-main
- - if: '$CI_COMMIT_BRANCH == "main"'
-   when: always
+.only-main:
+  - if: '$CI_COMMIT_BRANCH == "main"'
+    when: always
+
+.octo-sts-job:
+  stage: .post
+  id_tokens:
+    DDOCTOSTS_ID_TOKEN:
+      aud: dd-octo-sts
+
+  before_script:
+    - dd-octo-sts version
+    - dd-octo-sts debug --scope DataDog/commit-headless --policy "${STS_POLICY}"
+    - dd-octo-sts token --scope DataDog/commit-headless --policy "${STS_POLICY}" > octo-sts-token
+    - echo "STS_TOKEN=$(cat octo-sts-token)" >> $GITLAB_ENV
+    - rm octo-sts-token
+
+  after_script:
+    - dd-octo-sts revoke -t "${STS_TOKEN}"
+
+test-push:
+  needs: [bldg-test]
+  extends: .octo-sts-job
+  variables:
+    STS_POLICY: "test-pipeline"
+
+  script:
+    - .ci/test-push.sh

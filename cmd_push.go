@@ -26,8 +26,9 @@ func (f *targetFlag) Decode(ctx *kong.DecodeContext) error {
 }
 
 type PushCmd struct {
-	Target  targetFlag `name:"repo" short:"R" required:"" help:"Target repository in owner/repo format."`
+	Target  targetFlag `name:"target" short:"T" required:"" help:"Target repository in owner/repo format."`
 	Branch  string     `required:"" help:"Name of the target branch on the remote."`
+	RepoDir string     `name:"repo" default:"." help:"Path to the local repository that contains commits you want to push. Must not be a worktree."`
 	Commits []string   `arg:"" optional:"" help:"Commit hashes to be applied to the target. Defaults to reading a list of commit hashes from standard input."`
 }
 
@@ -55,7 +56,7 @@ func (c *PushCmd) Run() error {
 	log("Branch: %s\n", c.Branch)
 	log("Commits: %s\n", commitsout)
 
-	return push(owner, repository, c.Branch, c.Commits)
+	return push(c.RepoDir, owner, repository, c.Branch, c.Commits)
 }
 
 func (c *PushCmd) Help() string {
@@ -90,7 +91,7 @@ pushed commits, you should hard reset the local checkout to the remote version a
 }
 
 // push actually performs the push
-func push(owner, repository, branch string, commits []string) error {
+func push(gitdir, owner, repository, branch string, commits []string) error {
 	token := os.Getenv("GH_TOKEN")
 	if token == "" {
 		return errors.New("no GH_TOKEN supplied")
@@ -105,9 +106,7 @@ func push(owner, repository, branch string, commits []string) error {
 
 	log("Current head commit: %s\n", headRef)
 
-	// TODO: Should we allow running this outside of the repository itself? Does it make a
-	// difference?
-	repo, err := Open("")
+	repo, err := Open(gitdir)
 	if err != nil {
 		return fmt.Errorf("open repo: %w", err)
 	}
