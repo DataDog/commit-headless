@@ -1,0 +1,14 @@
+schema-version: v2
+dd-service: commit-headless
+dd-team: devloops
+contacts:
+  - type: slack
+    contact: https://dd.enterprise.slack.com/archives/C04DW0M3Y3T
+links: []
+repos:
+  - name: Source
+    url: https://github.com/DataDog/commit-headless
+docs:
+  - name: Source
+    url: https://github.com/DataDog/commit-headless
+tags: []
