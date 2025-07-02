@@ -6,11 +6,6 @@ variables:
   CI_IMAGE_TAG: "v69355779-887ca009@sha256:5f54925e98f1961dd7476eae8faba387efbdc7fa78ce1b515c828e9bf583a1fd"
   CI_IMAGE: "${CI_IMAGE_REPO}:${CI_IMAGE_TAG}"
 
-stages:
-  - build
-  - test
-  - publish
-
 default:
   tags: ["arch:amd64"]
   image: ${CI_IMAGE}
@@ -21,7 +16,7 @@ default:
 build-ci-image:
   when: manual
   image: ${DOCKER_IMAGE}
-  stage: build
+  stage: .pre
   script:
     - METADATA_FILE=$(mktemp)
     - tag="${CI_IMAGE_REPO}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}"
@@ -29,15 +24,12 @@ build-ci-image:
     - ddsign sign "${tag}" --docker-metadata-file ${METADATA_FILE}
 
 .only-main:
- - if: '$CI_COMMIT_BRANCH == "main"'
-   when: always
+  - if: '$CI_COMMIT_BRANCH == "main"'
+    when: always
 
 .octo-sts-job:
-  # Even though this repository does have a bldg-test job, you cannot need it from here.
-  # TODO: Write our own test job to depend on.
-  # needs: [bldg-test]
-  needs: [test]
-  stage: test
+  needs: [bldg-test]
+  stage: .post
   id_tokens:
     DDOCTOSTS_ID_TOKEN:
       aud: dd-octo-sts
@@ -51,10 +43,6 @@ build-ci-image:
 
   after_script:
     - dd-octo-sts revoke -t "${STS_TOKEN}"
-
-test:
-  stage: test
-  script: go test -v .
 
 test-push:
   extends: .octo-sts-job
