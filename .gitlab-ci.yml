@@ -6,6 +6,15 @@ variables:
   CI_IMAGE_TAG: "v69355779-887ca009@sha256:5f54925e98f1961dd7476eae8faba387efbdc7fa78ce1b515c828e9bf583a1fd"
   CI_IMAGE: "${CI_IMAGE_REPO}:${CI_IMAGE_TAG}"
 
+  IMAGE_REPO: "registry.ddbuild.io/commit-headless-prerelease"
+  PUBLISH_IMAGE_REPO: "registry.ddbuild.io/commit-headless"
+
+  # Setup the go environment variables, primarily GOPROXY
+  # XXX: Taken from dd-go/.mm/go/gitlab.gomod.yml
+  GOPROXY: "https://depot-read-api-go.us1.ddbuild.io/magicmirror/magicmirror/@current/|https://depot-read-api-go.us1.ddbuild.io/magicmirror/testing/@current/"
+  GONOSUMDB: "github.com/DataDog,go.ddbuild.io"
+  GOPRIVATE: ""
+
 default:
   tags: ["arch:amd64"]
   image: ${CI_IMAGE}
@@ -13,6 +22,14 @@ default:
     - git config --global url."https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.ddbuild.io/DataDog/".insteadOf "https://github.com/DataDog/"
     - git config --global --add safe.directory $PWD
 
+stages:
+  - test
+  - release
+
+
+# Executed manually when the CI image needs to be updated. Results from the build should replace
+# CI_IMAGE_TAG in variables, above.
+# This job uses the DOCKER_IMAGE, whereas all other jobs use CI_IMAGE.
 build-ci-image:
   when: manual
   image: ${DOCKER_IMAGE}
@@ -23,12 +40,8 @@ build-ci-image:
     - docker buildx build --tag ${tag} --label target=build --push --metadata-file ${METADATA_FILE} --file Dockerfile.ci .
     - ddsign sign "${tag}" --docker-metadata-file ${METADATA_FILE}
 
-.only-main:
-  - if: '$CI_COMMIT_BRANCH == "main"'
-    when: always
 
 .octo-sts-job:
-  stage: .post
   id_tokens:
     DDOCTOSTS_ID_TOKEN:
       aud: dd-octo-sts
@@ -43,11 +56,61 @@ build-ci-image:
   after_script:
     - dd-octo-sts revoke -t "${STS_TOKEN}"
 
-test-push:
-  needs: [bldg-test]
-  extends: .octo-sts-job
-  variables:
-    STS_POLICY: "test-pipeline"
 
+test:
+  stage: test
   script:
-    - .ci/test-push.sh
+    - go test -v .
+
+
+# Releases are triggered manually, or by changes to version.go
+# TODO: Cross compile
+release:build:
+  stage: release
+  needs: [test] # add prerelease test job
+  rules:
+    - changes:
+        - version.go
+    - when: manual
+  script: .ci/build.sh
+  artifacts:
+    paths:
+      - dist/
+
+
+# TODO: Multi-arch
+release:image:
+  stage: release
+  needs: [release:build]
+  image: ${DOCKER_IMAGE}
+  script: .ci/release.sh
+  artifacts:
+    paths:
+      - image-metadata.json
+      - dist/VERSION.txt
+
+
+# Publish takes the image produced by the release job and tags it appropriately for users to find
+# it.
+release:publish:
+  stage: release
+  needs: [release:image]
+  image: ${DOCKER_IMAGE}
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes:
+        - version.go
+    - when: manual # NOTE: For testing purposes primarily, normally runs by default on changes to version.go
+  script: .ci/publish.sh
+
+
+# Runs a set of live tests using the to-be-released version of commit-headless
+#release:test:
+#  extends: .octo-sts-job
+#  stage: release
+#  needs: [release:build]
+#  variables:
+#    STS_POLICY: "test-pipeline"
+#
+#  script:
+#    - .ci/test-push.sh

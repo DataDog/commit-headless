@@ -79,3 +79,12 @@ Pushed 4 commits.
 Branch URL: https://github.com/datadog/commit-headless/commits/bot-branch-remote
 281ff0fa1204e93c8931a774c6ebe2c69e66eddd
 ```
+
+## Releasing
+
+Releases are automated by merging a change to VERSION.
+
+Additionally, a prerelease can be triggered on any branch by manually running the release job.
+
+Generally speaking, releases and prereleases are the same. They both run a series of live tests
+against this repository to assert that commit-headless can do its job.
