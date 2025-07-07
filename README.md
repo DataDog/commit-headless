@@ -82,9 +82,16 @@ Branch URL: https://github.com/datadog/commit-headless/commits/bot-branch-remote
 
 ## Releasing
 
-Releases are automated by merging a change to VERSION.
+The release process has two parts to it: prerelease and publish.
 
-Additionally, a prerelease can be triggered on any branch by manually running the release job.
+Prerelease occurs automatically on a push to main, or can be manually triggered by the
+`release:build` job on any branch.
 
-Generally speaking, releases and prereleases are the same. They both run a series of live tests
-against this repository to assert that commit-headless can do its job.
+Additionally, on main, the `release:publish` job will run. This job takes the prerelease image and
+tags it for release.
+
+You can view all prereleases with crane: `crane ls registry.ddbuild.io/commit-headless-prerelease`
+You can view all releases with crane: `crane ls registry.ddbuild.io/commit-headless`
+
+Note that the final publish job will fail unless there was also a change to `version.go` to avoid
+overwriting existing releases.

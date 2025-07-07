@@ -63,14 +63,13 @@ test:
     - go test -v .
 
 
-# Releases are triggered manually, or by changes to version.go
+# Releases are triggered on pushes to main, or manually
 # TODO: Cross compile
 release:build:
   stage: release
   needs: [test] # add prerelease test job
   rules:
-    - changes:
-        - version.go
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
     - when: manual
   script: .ci/build.sh
   artifacts:
@@ -91,16 +90,13 @@ release:image:
 
 
 # Publish takes the image produced by the release job and tags it appropriately for users to find
-# it.
+# it. Only happens on the default branch.
 release:publish:
   stage: release
   needs: [release:image]
   image: ${DOCKER_IMAGE}
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-      changes:
-        - version.go
-    - when: manual # NOTE: For testing purposes primarily, normally runs by default on changes to version.go
   script: .ci/publish.sh
 
 
