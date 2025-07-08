@@ -84,7 +84,7 @@ release:image:
   artifacts:
     paths:
       - image-metadata.json
-      - dist/VERSION.txt
+      - dist/
 
 
 # Publish takes the image produced by the release job and tags it appropriately for users to find
@@ -95,7 +95,9 @@ release:publish:
   image: ${DOCKER_IMAGE}
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-  script: .ci/publish.sh
+  script:
+    - .ci/publish.sh
+    - .ci/publish-image.sh
 
 
 # Runs a set of live tests using the to-be-released version of commit-headless
