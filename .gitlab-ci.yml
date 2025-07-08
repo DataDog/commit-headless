@@ -64,7 +64,6 @@ test:
 
 
 # Releases are triggered on pushes to main, or manually
-# TODO: Cross compile
 release:build:
   stage: release
   needs: [test] # add prerelease test job
@@ -77,7 +76,6 @@ release:build:
       - dist/
 
 
-# TODO: Multi-arch
 release:image:
   stage: release
   needs: [release:build]
