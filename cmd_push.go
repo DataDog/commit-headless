@@ -77,11 +77,11 @@ allowing you to capture it in a script. All other output is printed to standard 
 
 For example, to push the most recent three commits:
 
-	commit-headless push -R owner/repo --branch branch HEAD HEAD^ HEAD^^
+	commit-headless push -T owner/repo --branch branch HEAD HEAD^ HEAD^^
 
 Or, to push all commits on the current branch that aren't on the main branch:
 
-	git log --oneline main.. | commit-headless push -R owner/repo --branch branch
+	git log --oneline main.. | commit-headless push -T owner/repo --branch branch
 
 When reading commit hashes from standard input, the only requirement is that the commit hash is at
 the start of the line, and any other content is separated by at least one whitespace character.
