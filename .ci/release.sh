@@ -25,4 +25,4 @@ if [[ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]]; then
     ddsign sign "${IMAGE_TAG}" --docker-metadata-file image-metadata.json
 fi
 
-echo 'Done!"
+echo "Done!"
