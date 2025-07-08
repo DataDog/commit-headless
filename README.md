@@ -90,8 +90,12 @@ Prerelease occurs automatically on a push to main, or can be manually triggered 
 Additionally, on main, the `release:publish` job will run. This job takes the prerelease image and
 tags it for release.
 
-You can view all prereleases with crane: `crane ls registry.ddbuild.io/commit-headless-prerelease`
-You can view all releases with crane: `crane ls registry.ddbuild.io/commit-headless`
+You can view all releases (and prereleases) with crane:
+
+```
+$ crane ls registry.ddbuild.io/commit-headless-prerelease
+$ crane ls registry.ddbuild.io/commit-headless
+```
 
 Note that the final publish job will fail unless there was also a change to `version.go` to avoid
 overwriting existing releases.

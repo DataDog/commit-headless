@@ -59,6 +59,10 @@ func (c *Client) browseCommitsURL() string {
 	return fmt.Sprintf("https://github.com/%s/%s/commits/%s", c.owner, c.repo, c.branch)
 }
 
+func (c *Client) commitURL(hash string) string {
+	return fmt.Sprintf("https://github.com/%s/%s/commit/%s", c.owner, c.repo, hash)
+}
+
 func (c *Client) graphqlURL() string {
 	return fmt.Sprintf("%s/graphql", c.baseURL)
 }
@@ -203,7 +207,11 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 		return "", errors.New("graphql response")
 	}
 
-	return payload.Data.CreateCommitOnBranch.Commit.ObjectID, nil
+	oid := payload.Data.CreateCommitOnBranch.Commit.ObjectID
+	log("Pushed commit %s -> %s\n", change.hash, oid)
+	log("  Commit URL: %s\n", c.commitURL(oid))
+
+	return oid, nil
 }
 
 type wrapper struct {
