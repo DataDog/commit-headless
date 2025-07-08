@@ -65,6 +65,13 @@ This command should be run when you have commits created locally that you'd like
 remote. You can pass the commit hashes either as space-separated arguments or over standard input
 with one commit hash per line.
 
+You must provide a GitHub token via the environment in one of the following variables, in preference
+order:
+
+	- HEADLESS_TOKEN
+	- GITHUB_TOKEN
+	- GH_TOKEN
+
 On a successful push, the hash of the last commit pushed will be printed to standard output,
 allowing you to capture it in a script. All other output is printed to standard error.
 
@@ -92,9 +99,9 @@ pushed commits, you should hard reset the local checkout to the remote version a
 
 // push actually performs the push
 func push(gitdir, owner, repository, branch string, commits []string) error {
-	token := os.Getenv("GH_TOKEN")
+	token := getToken(os.Getenv)
 	if token == "" {
-		return errors.New("no GH_TOKEN supplied")
+		return errors.New("no GitHub token supplied")
 	}
 
 	client := NewClient(context.Background(), token, owner, repository, branch)
