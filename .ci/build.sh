@@ -2,9 +2,6 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-# Print commands, but do not expand variables (avoid leaking secrets)
-set -o verbose
-
 PLATFORMS=(
     "darwin-amd64"
     "darwin-arm64"
