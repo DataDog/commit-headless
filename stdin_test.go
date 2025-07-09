@@ -35,16 +35,16 @@ func TestCommitsFromStdin(t *testing.T) {
 		wantErr error
 	}{{
 		name: "default",
-		in:   bytes.NewBufferString("deadbeef\nabracadabra"),
-		want: []string{"abracadabra", "deadbeef"},
+		in:   bytes.NewBufferString("deadbeef\nabba"),
+		want: []string{"abba", "deadbeef"},
 	}, {
 		name: "mixed input",
-		in:   bytes.NewBufferString("deadbeef\nnot-a-commit-hash\nabracadabra"),
-		want: []string{"abracadabra", "deadbeef"},
+		in:   bytes.NewBufferString("deadbeef\nnot-a-commit-hash\nabba"),
+		want: []string{"abba", "deadbeef"},
 	}, {
 		name: "stuff after the hash",
-		in:   bytes.NewBufferString("deadbeef (test-branch) feat: hello\nnot-a-commit-hash\nabracadabra"),
-		want: []string{"abracadabra", "deadbeef"},
+		in:   bytes.NewBufferString("deadbeef (test-branch) feat: hello\nnot-a-commit-hash\nabba"),
+		want: []string{"abba", "deadbeef"},
 	}, {
 		name:    "not a pipe",
 		in:      fakefile("unpiped"),

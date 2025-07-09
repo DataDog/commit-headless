@@ -29,7 +29,9 @@ type PushCmd struct {
 	Target  targetFlag `name:"target" short:"T" required:"" help:"Target repository in owner/repo format."`
 	Branch  string     `required:"" help:"Name of the target branch on the remote."`
 	RepoDir string     `name:"repo" default:"." help:"Path to the local repository that contains commits you want to push. Must not be a worktree."`
-	Commits []string   `arg:"" optional:"" help:"Commit hashes to be applied to the target. Defaults to reading a list of commit hashes from standard input."`
+	DryRun  bool       `name:"dry-run" help:"Perform everything except the final remote writes to GitHub."`
+
+	Commits []string `arg:"" optional:"" help:"Commit hashes to be applied to the target. Defaults to reading a list of commit hashes from standard input."`
 }
 
 func (c *PushCmd) Run() error {
@@ -56,7 +58,7 @@ func (c *PushCmd) Run() error {
 	log("Branch: %s\n", c.Branch)
 	log("Commits: %s\n", commitsout)
 
-	return push(c.RepoDir, owner, repository, c.Branch, c.Commits)
+	return push(c.RepoDir, owner, repository, c.Branch, c.Commits, c.DryRun)
 }
 
 func (c *PushCmd) Help() string {
@@ -98,13 +100,14 @@ pushed commits, you should hard reset the local checkout to the remote version a
 }
 
 // push actually performs the push
-func push(gitdir, owner, repository, branch string, commits []string) error {
+func push(gitdir, owner, repository, branch string, commits []string, dryrun bool) error {
 	token := getToken(os.Getenv)
 	if token == "" {
 		return errors.New("no GitHub token supplied")
 	}
 
 	client := NewClient(context.Background(), token, owner, repository, branch)
+	client.dryrun = dryrun
 
 	headRef, err := client.GetHeadCommitHash(context.Background())
 	if err != nil {
@@ -113,10 +116,7 @@ func push(gitdir, owner, repository, branch string, commits []string) error {
 
 	log("Current head commit: %s\n", headRef)
 
-	repo, err := Open(gitdir)
-	if err != nil {
-		return fmt.Errorf("open repo: %w", err)
-	}
+	repo := &Repository{path: gitdir}
 
 	changes, err := repo.Changes(commits...)
 	if err != nil {
@@ -126,6 +126,7 @@ func push(gitdir, owner, repository, branch string, commits []string) error {
 	for _, c := range changes {
 		log("Commit %s\n", c.hash)
 		log("  Headline: %s\n", c.Headline)
+		log("  Body: %s\n", c.Body)
 		log("  Changed files: %d\n", len(c.Changes))
 		for p, content := range c.Changes {
 			action := "MODIFY"

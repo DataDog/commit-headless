@@ -1,164 +1,172 @@
 package main
 
 import (
-	"errors"
+	"bufio"
+	"bytes"
 	"fmt"
-	"io"
+	"os/exec"
 	"strings"
-
-	git "github.com/go-git/go-git/v6"
-	"github.com/go-git/go-git/v6/plumbing"
-	"github.com/go-git/go-git/v6/plumbing/object"
-	"github.com/go-git/go-git/v6/utils/merkletrie"
 )
 
 type Repository struct {
-	inner *git.Repository
+	path string
 }
 
-// Open opens and returns a Repository in the current working directory
-// TODO: Not sure if/how to open a path to a git worktree specifically, or how to detect that the
-// path points to a worktree. Either make it work or make it a clear error.
-func Open(path string) (*Repository, error) {
-	r, err := git.PlainOpen(path)
-	return &Repository{inner: r}, err
-}
-
-// Changes takes a number of commit hashes and returns github.Change records for each commit
+// Returns a Change for each supplied commit
 func (r *Repository) Changes(commits ...string) ([]Change, error) {
-	changes := []Change{}
-	for _, c := range commits {
-		h, err := r.inner.ResolveRevision(plumbing.Revision(c))
+	changes := make([]Change, len(commits))
+	for i, h := range commits {
+		change, err := r.changed(h)
 		if err != nil {
-			return nil, fmt.Errorf("resolve revision %s: %w", c, err)
+			return nil, fmt.Errorf("get change %s: %w", h, err)
 		}
-
-		change, err := r.changed(*h)
-		if err != nil {
-			return nil, fmt.Errorf("get changes (%s): %w", *h, err)
-		}
-
-		changes = append(changes, change)
+		changes[i] = change
 	}
-
 	return changes, nil
 }
 
-// changed returns a github.Change for the provided commit hash
-func (r *Repository) changed(h plumbing.Hash) (Change, error) {
-	c, err := r.inner.CommitObject(h)
+// Returns a Change for the specific commit
+func (r *Repository) changed(commit string) (Change, error) {
+	// First, make sure the commit looks like a commit hash
+	// While technically all of our calls would work with references such as HEAD,
+	// refs/heads/branch, refs/tags/etc we're going to require callers provide things that look like
+	// commits.
+	if !hashRegex.MatchString(commit) {
+		return Change{}, fmt.Errorf("commit %q does not look like a commit, should be at least 4 hexadecimal digits.", commit)
+	}
+
+	parents, author, message, err := r.catfile(commit)
 	if err != nil {
-		return Change{}, fmt.Errorf("read commit %s: %w", h, err)
+		return Change{}, err
 	}
 
-	if c.NumParents() > 1 {
-		// TODO: Consider if we want to support merge commits at all. There's a lot of risk of
-		// reproducing a crap ton of commits from, eg, main, which shouldn't really be a factor
-		// in this workflow. That is, unless a use case requires signed merge commits, we're
-		// going to leave this in place.
-		return Change{}, fmt.Errorf("range includes a merge commit (%s), not continuing", h)
+	if len(parents) > 1 {
+		return Change{}, fmt.Errorf("range includes a merge commit (%s), not continuing", commit)
 	}
 
-	headline, body, _ := strings.Cut(strings.TrimSpace(c.Message), "\n")
+	headline, body, _ := strings.Cut(strings.TrimSpace(message), "\n")
 
 	if body != "" {
 		body += "\n\n"
 	}
 
-	body = fmt.Sprintf("%sCo-authored-by: %s <%s>", body, c.Author.Name, c.Author.Email)
+	body = fmt.Sprintf("%sCo-authored-by: %s", body, author)
 
-	input := Change{
-		hash:     h.String(),
+	change := Change{
+		hash:     commit,
 		Headline: headline,
 		Body:     body,
 		Changes:  map[string][]byte{},
 	}
 
-	tree, err := c.Tree()
+	change.Changes, err = r.changedFiles(commit)
 	if err != nil {
-		return input, fmt.Errorf("get tree %s: %w", h, err)
+		return Change{}, err
 	}
 
-	var ptree *object.Tree
-	if c.NumParents() == 1 {
-		parent, err := c.Parent(0)
-		if err != nil {
-			return input, fmt.Errorf("get parent %s: %w", h, err)
-		}
-
-		ptree, err = parent.Tree()
-		if errors.Is(err, plumbing.ErrObjectNotFound) {
-			// parent may not have a tree if the first commit was an empty commit
-			// just treat it as a nil tree
-			// TODO: test case here
-			ptree = &object.Tree{}
-		} else if err != nil {
-			return input, fmt.Errorf("get parent tree %s: %w", h, err)
-		}
-	} else {
-		ptree = &object.Tree{}
-	}
-
-	diff, err := ptree.Diff(tree)
-	if err != nil {
-		return input, fmt.Errorf("compute diff %s: %w", h, err)
-	}
-
-	for _, change := range diff {
-		action, err := change.Action()
-		if err != nil {
-			return input, fmt.Errorf("get change type %s: %w", h, err)
-		}
-
-		if action == merkletrie.Delete {
-			input.Changes[change.From.Name] = []byte{}
-			continue
-		}
-
-		// This is a rename, which is a delete on the old name and a modify on the new name
-		// so we mark the from as a delete but continue execution
-		if change.From.Name != "" && change.From.Name != change.To.Name {
-			input.Changes[change.From.Name] = []byte{}
-		}
-
-		name := change.To.Name
-
-		content, err := fileContents(tree, name)
-		if err != nil {
-			return input, err
-		}
-
-		input.Changes[name] = content
-	}
-
-	return input, nil
+	return change, nil
 }
 
-// fileContents takes an object.Tree and filename and returns the contents of the file, if any
-func fileContents(t *object.Tree, name string) ([]byte, error) {
-	f, err := t.File(name)
-	// XXX: This shouldn't happen, as it implies the file was deleted but we would have caught
-	// that in the action block above.
-	if errors.Is(err, object.ErrFileNotFound) {
-		return nil, nil
-	} else if err != nil {
-		return nil, fmt.Errorf("get file %s: %w", name, err)
-	}
-
-	// contents are in f.Contents, or f.Reader
-	// since we transmit as bytes and the json encoder already base64 encodes byte strings,
-	// we don't need to encode ourselves
-	r, err := f.Reader()
+func (r *Repository) catfile(commit string) ([]string, string, string, error) {
+	cmd := exec.Command("git", "cat-file", "commit", commit)
+	cmd.Dir = r.path
+	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("read file %s: %w", name, err)
+		return nil, "", "", err
 	}
 
-	content, err := io.ReadAll(r)
+	parents := []string{}
+	author, message := "", ""
+
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		ln := scanner.Text()
+
+		// End of headers, start of message
+		if ln == "" {
+			break
+		}
+
+		key, value, _ := strings.Cut(ln, " ")
+
+		switch key {
+		case "parent":
+			parents = append(parents, value)
+		case "author":
+			// author line is First Last <email@domain.com> timestamp timezone
+			// so we can just grab up to the last >
+			marker := strings.LastIndex(value, ">")
+			if marker == -1 {
+				// no author, or malformed, so make one up
+				log("Author is malformed, using a placeholder.\n")
+				log("  Malformed: %s\n", value)
+				author = "Commit Headless <commit-headless-bot@datadoghq.com>"
+			} else {
+				author = value[:marker+1]
+			}
+		}
+	}
+
+	mb := &strings.Builder{}
+	for scanner.Scan() {
+		mb.WriteString(scanner.Text())
+		mb.WriteString("\n")
+	}
+
+	message = strings.TrimSpace(mb.String())
+
+	if err := scanner.Err(); err != nil {
+		return nil, "", "", err
+	}
+
+	return parents, author, message, nil
+}
+
+// Returns the files changed in the given commit, along with their contents
+// Deleted files will have an empty value
+func (r *Repository) changedFiles(commit string) (map[string][]byte, error) {
+	cmd := exec.Command("git", "diff-tree", "--no-commit-id", "--name-status", "-r", commit)
+	cmd.Dir = r.path
+	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("read file content %s: %w", name, err)
+		return nil, err
 	}
 
-	r.Close()
+	changes := map[string][]byte{}
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		ln := scanner.Text()
 
-	return content, nil
+		status, value, _ := strings.Cut(ln, "\t")
+		switch {
+		case status == "A" || status == "M":
+			contents, err := r.fileContent(commit, value)
+			if err != nil {
+				return nil, fmt.Errorf("get content %s:%s: %w", commit, value, err)
+			}
+			changes[value] = contents
+		case strings.HasPrefix(status, "R"): // Renames may have a similarity score after the R
+			from, to, _ := strings.Cut(value, "\t")
+			changes[from] = []byte{}
+			contents, err := r.fileContent(commit, to)
+			if err != nil {
+				return nil, fmt.Errorf("get content %s:%s: %w", commit, to, err)
+			}
+			changes[to] = contents
+		case status == "D":
+			changes[value] = []byte{}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return changes, nil
+}
+
+func (r *Repository) fileContent(commit, path string) ([]byte, error) {
+	cmd := exec.Command("git", "cat-file", "blob", fmt.Sprintf("%s:%s", commit, path))
+	cmd.Dir = r.path
+	return cmd.Output()
 }

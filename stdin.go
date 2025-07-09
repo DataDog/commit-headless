@@ -21,7 +21,7 @@ var (
 	errNoCommitsStdin = errors.New("no commits present on standard input")
 )
 
-var hexdigits = regexp.MustCompile(`[a-f0-9]{4,}`)
+var hashRegex = regexp.MustCompile(`^[a-f0-9]{4,40}$`)
 
 // reads a list of commit hashes from r, which is typically stdin, returning the commit hashes in
 // reverse order
@@ -50,7 +50,7 @@ func commitsFromStdin(r io.Reader) ([]string, error) {
 			continue
 		}
 
-		if hexdigits.MatchString(fs[0]) {
+		if hashRegex.MatchString(fs[0]) {
 			commits = append(commits, fs[0])
 		}
 	}
