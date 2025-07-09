@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"golang.org/x/oauth2"
 )
@@ -31,6 +32,8 @@ type Client struct {
 	owner  string
 	repo   string
 	branch string
+
+	dryrun bool
 
 	// Used for testing purposes
 	baseURL string
@@ -167,6 +170,11 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 	queryJSON, err := json.Marshal(query)
 	if err != nil {
 		return "", fmt.Errorf("encode mutation: %w", err)
+	}
+
+	if c.dryrun {
+		log("Dry run enabled, not writing commit.\n")
+		return strings.Repeat("0", len(change.hash)), nil
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.graphqlURL(), bytes.NewReader(queryJSON))
