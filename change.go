@@ -49,5 +49,5 @@ func (c Change) Body() string {
 		sb.WriteString(fmt.Sprintf("%s: %s\n", t[0], t[1]))
 	}
 
-	return sb.String()
+	return strings.TrimSpace(sb.String())
 }
