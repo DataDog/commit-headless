@@ -1,6 +1,9 @@
 # commit-headless
 
-A binary tool and GitHub action for creating signed commits from headless workflows
+A binary tool and GitHub Action for creating signed commits from headless workflows
+
+For the Action, please see [the action branch][action-branch] and the associated `action/`
+release tags.
 
 `commit-headless` is focused on turning local commits (or dirty files) into signed commits on the
 remote. It does this via the GitHub GraphQL API, more specifically the [createCommitOnBranch][mutation]
@@ -10,6 +13,7 @@ When this API is used with a GitHub App token, the resulting commit will be sign
 GitHub on behalf of the application.
 
 [mutation]: https://docs.github.com/en/graphql/reference/mutations#createcommitonbranch
+[action-branch]: https://github.com/DataDog/commit-headless/tree/action
 
 ## Usage
 

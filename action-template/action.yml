@@ -1,0 +1,44 @@
+name: Create signed commits out of local commits or a set of changed files.
+
+description: |
+  This GitHub Action was built specifically to simplify creating signed and verified commits on GitHub.
+
+  The created commits will be signed, and committer and author attribution will be the owner of the
+  token that was used to create the commit. This is part of the GitHub API and cannot be changed.
+  However, the original commit author and message will be retained as a "Co-authored-by" trailer and
+  the message body, respectively.
+inputs:
+  token:
+    description: 'GitHub token'
+    required: true
+    default: ${{ github.token }}
+  target:
+    description: 'Target owner/repository'
+    required: true
+    default: ${{ github.repository }}
+  branch:
+    description: 'Target branch name'
+    required: true
+  command:
+    description: 'Command to run. One of "commit" or "push"'
+    required: true
+  commits:
+    description: 'For push, the list of commit hashes to push, oldest first'
+  files:
+    description: 'For commit, the list of files to include in the commit'
+  force:
+    description: 'For commit, set to true to support file deletion'
+    default: false
+  author:
+    description: 'For commit, the commit author'
+    default: 'github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>'
+  message:
+    description: 'For commit, the commit message'
+
+outputs:
+  pushed_sha:
+    description: 'Commit hash of the last commit created'
+
+runs:
+  using: 'node20'
+  main: 'action.js'
