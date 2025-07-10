@@ -13,28 +13,60 @@ GitHub on behalf of the application.
 
 ## Usage
 
-Currently, there is one command: `commit-headless push`. It takes a target owner/repository and
-remote branch name, as well as a list of commit hashes as arguments *or* a list of commit hashes *in
-reverse chronological order (newest first)* on standard input.
+There are two ways to create signed headless commits with this tool: `push` and `commit`.
+
+Both of these commands take a target owner/repository (eg, `--target/-T DataDog/commit-headless`)
+and remote branch name (eg, `--branch bot-branch`) as required flags and expect to find a GitHub
+token in one of the following environment variables:
+
+- HEADLESS_TOKEN
+- GITHUB_TOKEN
+- GH_TOKEN
+
+In normal usage, `commit-headless` will print *only* the reference to the last commit created on the
+remote, allowing this to easily be captured in a script.
+
+More on the specifics for each command below. See also: `commit-headless <command> --help`
+
+### commit-headless push
+
+In addition to the required target and branch flags, the `push` command expects a list of commit
+hashes as arguments *or* a list of commit hashes *in reverse chronological order (newest first)*
+on standard input.
 
 It will iterate over the supplied commits, extract the set of changed files and commit message, then
 craft new *remote* commits corresponding to each local commit.
 
 The remote commit will have the original commit message, with "Co-authored-by" trailer for the
-original commit message. This is because commits created using the GraphQL API do not support
-setting the author or committer (they are inferred from the token owner), so adding a
-"Co-authored-by" trailer allows the commits to carry attribution to the original (bot) committer.
-
-In normal usage, `commit-headless` will print *only* the reference to the last commit created on the
-remote, allowing this to easily be captured in a script. For example output, see the later section.
+original commit author.
 
 You can use `commit-headless push` via:
 
-    GH_TOKEN=xyz commit-headless push --target datadog/commit-headless --branch bot-branch-remote HASH1 HASH2 HASH3 ...
+    commit-headless push [flags...] HASH1 HASH2 HASH3 ...
 
 Or, using git log (note `--oneline`):
 
-    git log --oneline main.. | GH_TOKEN=xyz commit-headless push --target datadog/commit-headless --branch bot-branch-remote
+    git log --oneline main.. | commit-headless push [flags...]
+
+### commit-headless commit
+
+This command is more geared for creating single commits at a time. It takes a list of files to
+commit changes to, and those files will either be updated/added or deleted in a single commit.
+
+Note that you cannot delete a file without also adding `--force` for safety reasons.
+
+Examples:
+
+    # Commit changes to these two files
+    commit-headless commit [flags...] -- README.md .gitlab-ci.yml
+
+    # Remove a file, add another one, and commit
+    rm file/i/do/not/want
+    echo "hello" > hi-there.txt
+    commit-headless commit [flags...] --force -- hi-there.txt file/i/do/not/want
+
+    # Commit a change with a custom message
+    commit-headless commit [flags...] -m"ran a pipeline" -- output.txt
 
 ## Try it!
 
@@ -88,13 +120,14 @@ Prerelease occurs automatically on a push to main, or can be manually triggered 
 `release:build` job on any branch.
 
 Additionally, on main, the `release:publish` job will run. This job takes the prerelease image and
-tags it for release.
+tags it for release, as well as produces a CI image with various other tools.
 
 You can view all releases (and prereleases) with crane:
 
 ```
 $ crane ls registry.ddbuild.io/commit-headless-prerelease
 $ crane ls registry.ddbuild.io/commit-headless
+$ crane ls registry.ddbuild.io/commit-headless-ci-image
 ```
 
 Note that the final publish job will fail unless there was also a change to `version.go` to avoid
