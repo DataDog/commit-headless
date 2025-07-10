@@ -12,20 +12,6 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// Change represents a change in a given commit.
-type Change struct {
-	hash string
-
-	// Headline is the first line of the commit message
-	Headline string
-	// Body is the rest of the commit message
-	Body string
-
-	// Changes is a map of path to file contents.
-	// Deleted files will map to nil contents or an empty byte slice.
-	Changes map[string][]byte
-}
-
 // Client provides methods for interacting with a remote repository on GitHub
 type Client struct {
 	httpC  *http.Client
@@ -124,7 +110,7 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 	added := []fileChange{}
 	deleted := []fileChange{}
 
-	for path, content := range change.Changes {
+	for path, content := range change.entries {
 		if len(content) == 0 {
 			deleted = append(deleted, fileChange{
 				Path: path,
@@ -144,8 +130,8 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 		},
 		ExpectedRef: headCommit,
 		Message: commitInputMessage{
-			Headline: change.Headline,
-			Body:     change.Body,
+			Headline: change.Headline(),
+			Body:     change.Body(),
 		},
 		Changes: commitInputChanges{
 			Additions: added,
