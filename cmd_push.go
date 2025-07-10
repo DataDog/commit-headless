@@ -2,43 +2,14 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
-	"strings"
 )
 
 type PushCmd struct {
 	remoteFlags
 	RepoPath string   `name:"repo-path" default:"." help:"Path to the repository that contains the commits. Defaults to the current directory."`
 	Commits  []string `arg:"" optional:"" help:"Commit hashes to be applied to the target. Defaults to reading a list of commit hashes from standard input."`
-}
-
-func (c *PushCmd) Run() error {
-	if len(c.Commits) == 0 {
-		var err error
-		c.Commits, err = commitsFromStdin(os.Stdin)
-		if err != nil {
-			return err
-		}
-	}
-
-	owner, repository := c.Target.Owner(), c.Target.Repository()
-
-	commits := c.Commits[:]
-	if len(c.Commits) >= 10 {
-		commits = commits[:10]
-		commits = append(commits, fmt.Sprintf("...and %d more.", len(c.Commits)-10))
-	}
-
-	commitsout := strings.Join(commits, ", ")
-
-	log("Owner: %s\n", owner)
-	log("Repository: %s\n", repository)
-	log("Branch: %s\n", c.Branch)
-	log("Commits: %s\n", commitsout)
-
-	return push(c.RepoPath, owner, repository, c.Branch, c.Commits, c.DryRun)
 }
 
 func (c *PushCmd) Help() string {
@@ -79,57 +50,24 @@ pushed commits, you should hard reset the local checkout to the remote version a
 `
 }
 
-// push actually performs the push
-func push(path, owner, repository, branch string, commits []string, dryrun bool) error {
-	token := getToken(os.Getenv)
-	if token == "" {
-		return errors.New("no GitHub token supplied")
+func (c *PushCmd) Run() error {
+	if len(c.Commits) == 0 {
+		var err error
+		c.Commits, err = commitsFromStdin(os.Stdin)
+		if err != nil {
+			return err
+		}
 	}
 
-	client := NewClient(context.Background(), token, owner, repository, branch)
-	client.dryrun = dryrun
+	// Convert c.Commits into []Change which we can feed to the remote
+	repo := &Repository{path: c.RepoPath}
 
-	headRef, err := client.GetHeadCommitHash(context.Background())
-	if err != nil {
-		return err
-	}
-
-	log("Current head commit: %s\n", headRef)
-
-	repo := &Repository{path: path}
-
-	changes, err := repo.Changes(commits...)
+	changes, err := repo.Changes(c.Commits...)
 	if err != nil {
 		return fmt.Errorf("get changes: %w", err)
 	}
 
-	for _, c := range changes {
-		log("Commit %s\n", c.hash)
-		log("  Headline: %s\n", c.Headline())
-		log("  Body: %s\n", c.Body())
-		log("  Changed files: %d\n", len(c.entries))
-		for p, content := range c.entries {
-			action := "MODIFY"
-			if len(content) == 0 {
-				action = "DELETE"
-			}
-			log("    - %s: %s\n", action, p)
-		}
-	}
+	owner, repository := c.Target.Owner(), c.Target.Repository()
 
-	pushed, newHead, err := client.PushChanges(context.Background(), headRef, changes...)
-	if err != nil {
-		return err
-	} else if pushed != len(changes) {
-		return fmt.Errorf("pushed %d of %d changes", pushed, len(changes))
-	}
-
-	log("Pushed %d commits.\n", len(changes))
-	log("Branch URL: %s\n", client.browseCommitsURL())
-
-	// The only thing that goes to standard output is the new head reference, allowing callers to
-	// capture stdout if they need the reference.
-	fmt.Println(newHead)
-
-	return nil
+	return pushChanges(context.Background(), owner, repository, c.Branch, c.DryRun, changes...)
 }
