@@ -23,7 +23,7 @@ func (c *PushCmd) Run() error {
 		}
 	}
 
-	owner, repository, _ := strings.Cut(string(c.Target), "/")
+	owner, repository := c.Target.Owner(), c.Target.Repository()
 
 	commits := c.Commits[:]
 	if len(c.Commits) >= 10 {

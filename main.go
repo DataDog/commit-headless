@@ -30,6 +30,17 @@ func (f *targetFlag) Decode(ctx *kong.DecodeContext) error {
 	return fmt.Errorf("must be of the form owner/repo with exactly one slash")
 }
 
+func (f targetFlag) Owner() string {
+	owner, _, _ := strings.Cut(string(f), "/")
+	return owner
+}
+
+func (f targetFlag) Repository() string {
+	_, repo, _ := strings.Cut(string(f), "/")
+	return repo
+}
+
+// flags that are shared among commands that interact with the remote
 type remoteFlags struct {
 	Target targetFlag `name:"target" short:"T" required:"" help:"Target repository in owner/repo format."`
 	Branch string     `required:"" help:"Name of the target branch on the remote."`
