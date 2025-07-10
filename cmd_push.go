@@ -6,32 +6,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
-
-	"github.com/alecthomas/kong"
 )
 
-type targetFlag string
-
-func (f *targetFlag) Decode(ctx *kong.DecodeContext) error {
-	if err := ctx.Scan.PopValueInto("string", &f); err != nil {
-		return err
-	}
-
-	slashes := strings.Count(string(*f), "/")
-	if slashes == 1 {
-		return nil
-	}
-
-	return fmt.Errorf("must be of the form owner/repo with exactly one slash")
-}
-
 type PushCmd struct {
-	Target  targetFlag `name:"target" short:"T" required:"" help:"Target repository in owner/repo format."`
-	Branch  string     `required:"" help:"Name of the target branch on the remote."`
-	RepoDir string     `name:"repo" default:"." help:"Path to the local repository that contains commits you want to push. Must not be a worktree."`
-	DryRun  bool       `name:"dry-run" help:"Perform everything except the final remote writes to GitHub."`
-
-	Commits []string `arg:"" optional:"" help:"Commit hashes to be applied to the target. Defaults to reading a list of commit hashes from standard input."`
+	remoteFlags
+	RepoPath string   `name:"repo-path" default:"." help:"Path to the repository that contains the commits. Defaults to the current directory."`
+	Commits  []string `arg:"" optional:"" help:"Commit hashes to be applied to the target. Defaults to reading a list of commit hashes from standard input."`
 }
 
 func (c *PushCmd) Run() error {
@@ -58,7 +38,7 @@ func (c *PushCmd) Run() error {
 	log("Branch: %s\n", c.Branch)
 	log("Commits: %s\n", commitsout)
 
-	return push(c.RepoDir, owner, repository, c.Branch, c.Commits, c.DryRun)
+	return push(c.RepoPath, owner, repository, c.Branch, c.Commits, c.DryRun)
 }
 
 func (c *PushCmd) Help() string {
@@ -96,11 +76,11 @@ pushed commits, you should hard reset the local checkout to the remote version a
 
 	git fetch origin <branch>
 	git reset --hard origin/<branch>
-	`
+`
 }
 
 // push actually performs the push
-func push(gitdir, owner, repository, branch string, commits []string, dryrun bool) error {
+func push(path, owner, repository, branch string, commits []string, dryrun bool) error {
 	token := getToken(os.Getenv)
 	if token == "" {
 		return errors.New("no GitHub token supplied")
@@ -116,7 +96,7 @@ func push(gitdir, owner, repository, branch string, commits []string, dryrun boo
 
 	log("Current head commit: %s\n", headRef)
 
-	repo := &Repository{path: gitdir}
+	repo := &Repository{path: path}
 
 	changes, err := repo.Changes(commits...)
 	if err != nil {
@@ -125,10 +105,10 @@ func push(gitdir, owner, repository, branch string, commits []string, dryrun boo
 
 	for _, c := range changes {
 		log("Commit %s\n", c.hash)
-		log("  Headline: %s\n", c.Headline)
-		log("  Body: %s\n", c.Body)
-		log("  Changed files: %d\n", len(c.Changes))
-		for p, content := range c.Changes {
+		log("  Headline: %s\n", c.Headline())
+		log("  Body: %s\n", c.Body())
+		log("  Changed files: %d\n", len(c.entries))
+		for p, content := range c.entries {
 			action := "MODIFY"
 			if len(content) == 0 {
 				action = "DELETE"

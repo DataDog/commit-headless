@@ -44,22 +44,14 @@ func (r *Repository) changed(commit string) (Change, error) {
 		return Change{}, fmt.Errorf("range includes a merge commit (%s), not continuing", commit)
 	}
 
-	headline, body, _ := strings.Cut(strings.TrimSpace(message), "\n")
-
-	if body != "" {
-		body += "\n\n"
-	}
-
-	body = fmt.Sprintf("%sCo-authored-by: %s", body, author)
-
 	change := Change{
-		hash:     commit,
-		Headline: headline,
-		Body:     body,
-		Changes:  map[string][]byte{},
+		hash:    commit,
+		message: message,
+		author:  author,
+		entries: map[string][]byte{},
 	}
 
-	change.Changes, err = r.changedFiles(commit)
+	change.entries, err = r.changedFiles(commit)
 	if err != nil {
 		return Change{}, err
 	}
