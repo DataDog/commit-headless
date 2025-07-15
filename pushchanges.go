@@ -10,7 +10,7 @@ import (
 
 // Takes a list of changes to push to the remote identified by target.
 // Prints the last commit pushed to standard output.
-func pushChanges(ctx context.Context, owner, repository, branch string, dryrun bool, changes ...Change) error {
+func pushChanges(ctx context.Context, owner, repository, branch, branchFrom string, dryrun bool, changes ...Change) error {
 	hashes := []string{}
 	for i := 0; i < len(changes) && i < 10; i++ {
 		hashes = append(hashes, changes[i].hash)
@@ -25,6 +25,10 @@ func pushChanges(ctx context.Context, owner, repository, branch string, dryrun b
 	log("Branch: %s\n", branch)
 	log("Commits: %s\n", strings.Join(hashes, ", "))
 
+	if branchFrom != "" && (!hashRegex.MatchString(branchFrom) || len(branchFrom) != 40) {
+		return fmt.Errorf("cannot branch from %q, must be a full 40 hex digit commit hash", branchFrom)
+	}
+
 	token := getToken(os.Getenv)
 	if token == "" {
 		return errors.New("no GitHub token supplied")
@@ -33,7 +37,7 @@ func pushChanges(ctx context.Context, owner, repository, branch string, dryrun b
 	client := NewClient(ctx, token, owner, repository, branch)
 	client.dryrun = dryrun
 
-	headRef, err := client.GetHeadCommitHash(context.Background())
+	headRef, err := client.GetHeadCommitHash(context.Background(), branchFrom)
 	if err != nil {
 		return err
 	}

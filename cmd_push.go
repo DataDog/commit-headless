@@ -69,5 +69,5 @@ func (c *PushCmd) Run() error {
 
 	owner, repository := c.Target.Owner(), c.Target.Repository()
 
-	return pushChanges(context.Background(), owner, repository, c.Branch, c.DryRun, changes...)
+	return pushChanges(context.Background(), owner, repository, c.Branch, c.BranchFrom, c.DryRun, changes...)
 }

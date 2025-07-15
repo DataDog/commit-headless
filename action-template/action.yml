@@ -19,6 +19,8 @@ inputs:
   branch:
     description: 'Target branch name'
     required: true
+  branch-from:
+    description: 'If necessary, create the remote branch using this commit hash as the branch point.'
   command:
     description: 'Command to run. One of "commit" or "push"'
     required: true
