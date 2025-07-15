@@ -62,6 +62,8 @@ func (c *CommitCmd) Run() error {
 	rootfs := os.DirFS(".")
 
 	for _, path := range c.Files {
+		path = strings.TrimPrefix(path, "./")
+
 		fp, err := rootfs.Open(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			if !c.Force {
