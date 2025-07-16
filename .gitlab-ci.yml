@@ -23,6 +23,7 @@ default:
     - git config --global --add safe.directory $PWD
 
 stages:
+  - reset
   - test
   - release
 
@@ -45,17 +46,31 @@ build-ci-image:
   id_tokens:
     DDOCTOSTS_ID_TOKEN:
       aud: dd-octo-sts
-
+  image: "registry.ddbuild.io/commit-headless-ci-image:v0.5.0"
+  variables:
+    STS_SCOPE: 'Datadog/commit-headless'
   before_script:
     - dd-octo-sts version
-    - dd-octo-sts debug --scope DataDog/commit-headless --policy "${STS_POLICY}"
-    - dd-octo-sts token --scope DataDog/commit-headless --policy "${STS_POLICY}" > octo-sts-token
+    - dd-octo-sts debug --scope "${STS_SCOPE}" --policy "${STS_POLICY}"
+    - dd-octo-sts token --scope "${STS_SCOPE}" --policy "${STS_POLICY}" > octo-sts-token
     - echo "STS_TOKEN=$(cat octo-sts-token)" >> $GITLAB_ENV
     - rm octo-sts-token
-
   after_script:
     - dd-octo-sts revoke -t "${STS_TOKEN}"
 
+staging-reset-manual:
+  image: "registry.ddbuild.io/commit-headless-ci-image:v0.5.0"
+  when: manual
+  stage: reset
+  id_tokens:
+    DDOCTOSTS_ID_TOKEN:
+      aud: dd-octo-sts
+  script:
+    - export REPO="commit-headless"
+    - bash .ci/reset-staging.sh
+  after_script:
+    - dd-octo-sts revoke -t "${READ_SCRIPT_TOKEN}"
+    - dd-octo-sts revoke -t "${GITHUB_TOKEN}"
 
 test:
   stage: test
