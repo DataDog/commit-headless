@@ -30,7 +30,7 @@ If your workflow creates multiple commits and you want to push all of them, you 
     echo "commits=\"$(git log "${{ github.sha }}".. --format='%H%x00' | tr '\n' ' ')\"" >> $GITHUB_OUTPUT
 
 - name: Push commits
-  uses: DataDog/commit-headless@action/v0.4.0
+  uses: DataDog/commit-headless@action/v0.5.0
   with:
     token: ${{ github.token }} # default
     target: ${{ github.repository }} # default
@@ -66,7 +66,7 @@ single commit out of them. For that, you can use `commit-headless commit`:
     echo "files=\"${files}\"" >> $GITHUB_OUTPUT
 
 - name: Create commit
-  uses: DataDog/commit-headless@action/v0.4.0
+  uses: DataDog/commit-headless@action/v0.5.0
   with:
     token: ${{ github.token }} # default
     target: ${{ github.repository }} # default
