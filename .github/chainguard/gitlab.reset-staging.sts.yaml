@@ -1,0 +1,19 @@
+issuer: https://gitlab.ddbuild.io
+
+# Allow this policy for pipelines on the main branch of this repository
+#subject: 'project_path:DataDog/commit-headless:ref_type:branch:ref:main'
+subject: 'project_path:DataDog/commit-headless:ref_type:branch:ref:test-weekly-reset'
+
+claim_pattern:
+  ref_protected: "true"
+  pipeline_source: 'schedule|push' # TODO: verify sources for manually executed jobs
+
+  # Only allow this policy to pipelines defined in the root .gitlab-ci.yml
+  ci_config_ref_uri: 'gitlab\.ddbuild\.io/DataDog/commit-headless//\.gitlab-ci\.ya?ml@.*'
+
+permissions:
+  # For creating the staging-reset commit
+  contents: write
+
+  # For creating, approving, and merging the pull request
+  pull_requests: write
