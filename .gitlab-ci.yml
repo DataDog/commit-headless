@@ -1,4 +1,5 @@
 variables:
+  CURRENT_STAGING: staging-30
   DOCKER_IMAGE: "registry.ddbuild.io/docker:24.0.4-gbi-focal"
   CI_IMAGE_REPO: "registry.ddbuild.io/ci/commit-headless"
   # Built on main commit 887ca009df25f0f20054dcb9cde962a8fc918ce6
@@ -67,9 +68,10 @@ staging-reset-manual:
       aud: dd-octo-sts
   script:
     - export REPO="commit-headless"
+    - export WEEKLY_STAGING_RESET=true
     - bash .ci/reset-staging.sh
-  after_script:
-    - dd-octo-sts revoke -t "${READ_SCRIPT_TOKEN}"
+  after_script: # TODO: these variables are not available here (exported in .ci/reset-staging.sh)
+    - dd-octo-sts revoke -t "${READ_SCRIPT_TOKEN}" || true; # make sure we can pass to the next revoke
     - dd-octo-sts revoke -t "${GITHUB_TOKEN}"
 
 test:

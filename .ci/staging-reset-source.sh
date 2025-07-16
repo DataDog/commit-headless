@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+# Print commands, but do not expand variables (avoid leaking secrets)
+# set -o verbose
+
 # Sourced from: https://github.com/DataDog/dogweb/blob/c8cd885a6736345ee941079d899a208c166b578e/tasks/gitlab/staging-reset.sh
 
 # Used by staging reset jobs in dd-go, dogweb, profiling-backend, and web-ui.
@@ -9,27 +12,24 @@ set -euo pipefail
 # rid of the Jenkins job. This script will be obsolete once we get rid of
 # the staging branch.
 
-# Add github public host key to the known_hosts
-mkdir -p ~/.ssh
-echo "github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=" > ~/.ssh/known_hosts
-
-# Pull the SSH key and use it
-eval "$(ssh-agent -s)"
-aws ssm get-parameter --region us-east-1 --name "ci.${REPO}.staging_reset_ssh_key" --with-decryption --query "Parameter.Value" --out text | ssh-add -
-
-GITHUB_STAGING_RESET_TOKEN=$(aws ssm get-parameter --region us-east-1 --name "ci.${REPO}.staging_reset_github_token" --with-decryption --query "Parameter.Value" --out text)
-GITHUB_STAGING_RESET_ADMIN_TOKEN=$(aws ssm get-parameter --region us-east-1 --name "ci.${REPO}.staging_reset_github_admin_token" --with-decryption --query "Parameter.Value" --out text)
-GITLAB_TOKEN=$(aws ssm get-parameter --region us-east-1 --name "ci.${REPO}.staging_reset_gitlab_token" --with-decryption --query "Parameter.Value" --out text)
-SLACK_TOKEN=$(aws ssm get-parameter --region us-east-1 --name "ci.${REPO}.staging_reset_slack_token" --with-decryption --query "Parameter.Value" --out text)
+#GITLAB_TOKEN=$(aws ssm get-parameter --region us-east-1 --name "ci.${REPO}.staging_reset_gitlab_token" --with-decryption --query "Parameter.Value" --out text)
+#SLACK_TOKEN=$(aws ssm get-parameter --region us-east-1 --name "ci.${REPO}.staging_reset_slack_token" --with-decryption --query "Parameter.Value" --out text)
+# XXX: Disabling gitlab and slack stuff
+GITLAB_TOKEN="xxx"
+SLACK_TOKEN="xxx"
 
 # Here, we clone the repository into a temporary directory, remove the remote
 # named origin (GitLab), and add GitHub as `origin` since
 # `git remote rename <old> <new>` is not supported on GitLab CI.
 repo_directory="$(mktemp -d)/${REPO}"
+
+# Because of the way the repository is cloned, this is how you mark it safe
+git config --global --add safe.directory "$PWD/.//.git"
 git clone ./ "${repo_directory}"
+
 cd "${repo_directory}"
 git remote remove origin
-git remote add origin git@github.com:DataDog/$REPO
+git remote add origin "https://anyuser:${GITHUB_TOKEN}@github.com/DataDog/$REPO"
 
 # Legacy staging reset flow:
 
@@ -40,6 +40,9 @@ git config push.default simple
 BASE_BRANCH="prod"
 if [[ $REPO == "web-ui" ]]; then
     BASE_BRANCH="preprod"
+fi
+if [[ $REPO == "commit-headless" ]]; then
+    BASE_BRANCH="reset-base"
 fi
 
 git fetch origin $BASE_BRANCH
@@ -94,7 +97,7 @@ if git rev-parse staging-${NEW_BRANCH_NUMBER} 2>/dev/null; then
 fi
 
 echo "Deleting old remote staging branch..."
-git push origin --delete staging-$NEW_BRANCH_NUMBER || true
+git push origin --delete staging-$NEW_BRANCH_NUMBER 2>/dev/null || true
 echo "Creating new staging branch..."
 git checkout -b staging-$NEW_BRANCH_NUMBER
 git push -u origin staging-$NEW_BRANCH_NUMBER -f
@@ -104,15 +107,20 @@ if [[ $(git status --porcelain) ]]; then
     echo "Changing staging branch in .gitlab-ci.yml..."
     git commit -n -m "Change staging branch in .gitlab-ci.yml to staging-$NEW_BRANCH_NUMBER" .gitlab-ci.yml
 
-    git push origin HEAD:refs/heads/staging-reset/staging-$NEW_BRANCH_NUMBER
-    PR_NUMBER=$(curl -H "Authorization: token $GITHUB_STAGING_RESET_TOKEN" -X POST https://api.github.com/repos/datadog/${REPO}/pulls -d '{"head":"staging-reset/staging-'"${NEW_BRANCH_NUMBER}"'","base":"'"${BASE_BRANCH}"'","title":"staging reset '"${NEW_BRANCH_NUMBER}"'"}' | jq -r .number)
+    commit-headless push \
+        --target "DataDog/${REPO}" \
+        --branch "staging-reset/staging-${NEW_BRANCH_NUMBER}" \
+        --branch-from "$(git rev-parse ${BASE_BRANCH})" \
+        "$(git rev-parse HEAD)"
+
+    PR_NUMBER=$(curl -H "Authorization: token $GITHUB_TOKEN" -X POST https://api.github.com/repos/datadog/${REPO}/pulls -d '{"head":"staging-reset/staging-'"${NEW_BRANCH_NUMBER}"'","base":"'"${BASE_BRANCH}"'","title":"staging reset '"${NEW_BRANCH_NUMBER}"'"}' | jq -r .number)
     echo "Created pull request: https://github.com/datadog/${REPO}/pull/${PR_NUMBER}, approving and waiting until I can merge this to continue..."
-    curl -H "Authorization: token $GITHUB_STAGING_RESET_ADMIN_TOKEN" -X POST https://api.github.com/repos/datadog/${REPO}/pulls/${PR_NUMBER}/reviews -d '{"event": "APPROVE"}'
-    MERGED=$(curl -H "Authorization: token $GITHUB_STAGING_RESET_ADMIN_TOKEN" -X PUT https://api.github.com/repos/datadog/${REPO}/pulls/${PR_NUMBER}/merge | jq .merged)
+    # curl -H "Authorization: token $GITHUB_TOKEN" -X POST https://api.github.com/repos/datadog/${REPO}/pulls/${PR_NUMBER}/reviews -d '{"event": "APPROVE"}'
+    MERGED=$(curl -H "Authorization: token $GITHUB_TOKEN" -X PUT https://api.github.com/repos/datadog/${REPO}/pulls/${PR_NUMBER}/merge | jq .merged)
     until [ "$MERGED" == "true" ]; do
     	echo "still not mergeable"
     	sleep 30
-	MERGED=$(curl -H "Authorization: token $GITHUB_STAGING_RESET_ADMIN_TOKEN" -X PUT https://api.github.com/repos/datadog/${REPO}/pulls/${PR_NUMBER}/merge | jq .merged)
+	MERGED=$(curl -H "Authorization: token $GITHUB_TOKEN" -X PUT https://api.github.com/repos/datadog/${REPO}/pulls/${PR_NUMBER}/merge | jq .merged)
     done
 else
     echo "Staging branch already up to date in .gitlab-ci.yml. Skipping."
@@ -136,7 +144,7 @@ if [ -f .gitlab-ci.yml ]; then
     echo "Disabling CI on the old branch..."
     git rm .gitlab-ci.yml
     git commit .gitlab-ci.yml -m "Remove .gitlab-ci.yml on old branch so pushes are noop"
-    git push --set-upstream origin staging-$OLD_BRANCH_NUMBER
+    commit-headless push --target "DataDog/${REPO}" --branch "staging-${OLD_BRANCH_NUMBER}" "$(git rev-parse HEAD)"
 else
     echo "CI already disabled on the old branch. Skipping."
 fi
@@ -152,6 +160,9 @@ else
     echo "Old branch already tagged for archiving. Skipping."
 fi
 # Don't delete the old branch or someone may re-push it containing .gitlab-ci.yml
+
+echo "Done with initial script, exiting before gitlab and slack code runs."
+exit 0;
 
 git checkout $BASE_BRANCH
 git pull

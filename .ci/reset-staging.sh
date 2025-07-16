@@ -3,11 +3,19 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-GITHUB_STAGING_RESET_TOKEN=$(aws ssm get-parameter --region us-east-1 --name "ci.${REPO}.staging_reset_github_token" --with-decryption --query "Parameter.Value" --out text)
+# Get our two tokens from dd-octo-sts
 
- # See https://github.com/DataDog/dogweb/blob/prod/tasks/gitlab/staging-reset.sh
+# XXX: This policy does not exist yet and our example is reading the script from the current
+# repository so we're reusing GITHUB_TOKEN below
+# export READ_SCRIPT_TOKEN=$(dd-octo-sts token --scope=DataDog --policy=gitlab.reset-staging-dl-script)
+export GITHUB_TOKEN=$(dd-octo-sts token --scope="DataDog/${REPO}" --policy=gitlab.reset-staging)
+export READ_SCRIPT_TOKEN="${GITHUB_TOKEN}"
+
+# Download the actual reset script from the upstream.
+# In normal usage this'd be from dogweb but in our case we're actually downloading it from the same
+# repository on the same branch.
 curl \
-  -H "Authorization: token ${GITHUB_STAGING_RESET_TOKEN}" \
+  -H "Authorization: token ${READ_SCRIPT_TOKEN}" \
   -H "Accept: application/vnd.github.v3.raw" \
-  https://api.github.com/repos/DataDog/dogweb/contents/tasks/gitlab/staging-reset.sh \
+  'https://api.github.com/repos/DataDog/commit-headless/contents/.ci/staging-reset-source.sh?ref=test-weekly-reset' \
   | bash
