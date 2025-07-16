@@ -44,6 +44,10 @@ func (c *Client) branchURL() string {
 	return fmt.Sprintf("%s/repos/%s/%s/branches/%s", c.baseURL, c.owner, c.repo, c.branch)
 }
 
+func (c *Client) refsURL() string {
+	return fmt.Sprintf("%s/repos/%s/%s/git/refs", c.baseURL, c.owner, c.repo)
+}
+
 func (c *Client) browseCommitsURL() string {
 	return fmt.Sprintf("https://github.com/%s/%s/commits/%s", c.owner, c.repo, c.branch)
 }
@@ -57,7 +61,8 @@ func (c *Client) graphqlURL() string {
 }
 
 // GetHeadCommitHash returns the current head commit hash for the configured repository and branch
-func (c *Client) GetHeadCommitHash(ctx context.Context) (string, error) {
+// If the branch does not exist (404 return), we'll attempt to create it from commit branchFrom
+func (c *Client) GetHeadCommitHash(ctx context.Context, branchFrom string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.branchURL(), nil)
 	if err != nil {
 		return "", fmt.Errorf("prepare http request: %w", err)
@@ -68,6 +73,14 @@ func (c *Client) GetHeadCommitHash(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("get commit hash: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		if branchFrom != "" {
+			return c.createBranch(ctx, branchFrom)
+		}
+
+		return "", fmt.Errorf("branch %q does not exist on the remote", c.branch)
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("get commit hash: http %d", resp.StatusCode)
@@ -81,6 +94,52 @@ func (c *Client) GetHeadCommitHash(ctx context.Context) (string, error) {
 
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return "", fmt.Errorf("decode commit hash response: %w", err)
+	}
+
+	return payload.Commit.Sha, nil
+}
+
+// createBranch attempts to create c.branch using branchFrom as the branch point
+func (c *Client) createBranch(ctx context.Context, branchFrom string) (string, error) {
+	log("Creating branch from commit %s\n", branchFrom)
+
+	var input bytes.Buffer
+
+	err := json.NewEncoder(&input).Encode(map[string]string{
+		"ref": fmt.Sprintf("refs/heads/%s", c.branch),
+		"sha": branchFrom,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.refsURL(), &input)
+	if err != nil {
+		return "", fmt.Errorf("prepare http request: %w", err)
+	}
+
+	resp, err := c.httpC.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("create branch request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnprocessableEntity {
+		return "", fmt.Errorf("create branch: http 422 (does the branch point exist?)")
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("create branch: http %d", resp.StatusCode)
+	}
+
+	payload := struct {
+		Commit struct {
+			Sha string
+		} `json:"object"`
+	}{}
+
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", fmt.Errorf("decode create branch response: %w", err)
 	}
 
 	return payload.Commit.Sha, nil

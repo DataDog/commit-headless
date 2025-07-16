@@ -27,6 +27,13 @@ token in one of the following environment variables:
 - GITHUB_TOKEN
 - GH_TOKEN
 
+Note that, by default, both of these commands expect the remote branch to already exist. If your
+workflow primarily works on *new* branches, you should additionally add the `--branch-from` flag and
+supply a commit hash to use as a branch point. With this flag, `commit-headless` will create the
+branch on GitHub from that commit hash if it doesn't already exist.
+
+Example: `commit-headless <command> [flags...] --branch-from=$(git rev-parse main HEAD) ...`
+
 In normal usage, `commit-headless` will print *only* the reference to the last commit created on the
 remote, allowing this to easily be captured in a script.
 

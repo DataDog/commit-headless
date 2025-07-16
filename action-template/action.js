@@ -40,6 +40,11 @@ function main() {
     "--branch", process.env.INPUT_BRANCH
   ];
 
+  const branchFrom = process.env["INPUT_BRANCH-FROM"] || "";
+  if (branchFrom !== "") {
+    args.push("--branch-from", branchFrom);
+  }
+
   if (command === "push") {
     args.push(...process.env.INPUT_COMMITS.split(/\s+/));
   } else {
