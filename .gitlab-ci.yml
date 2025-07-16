@@ -1,4 +1,5 @@
 variables:
+  CURRENT_STAGING: staging-30
   DOCKER_IMAGE: "registry.ddbuild.io/docker:24.0.4-gbi-focal"
   CI_IMAGE_REPO: "registry.ddbuild.io/ci/commit-headless"
   # Built on main commit 887ca009df25f0f20054dcb9cde962a8fc918ce6
