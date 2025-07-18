@@ -24,13 +24,19 @@ function main() {
 
   const cmd = `${__dirname}/${binary}`
 
+  try {
+    fs.chmodSync(cmd, 0o755);
+  } catch (err) {
+    console.error(`Error making binary executable: ${err.message}`);
+  }
+
   const env = { ...process.env };
   env.HEADLESS_TOKEN = process.env.INPUT_TOKEN;
 
   const command = process.env.INPUT_COMMAND;
 
   if (!["commit", "push"].includes(command)) {
-    console.error(`Unknown command ${command}. Must be one of "commit" or "push".`);
+    console.error(`Unknown command '${command}'. Must be one of "commit" or "push".`);
     process.exit(1);
   }
 
@@ -66,6 +72,7 @@ function main() {
 
   const child = childProcess.spawnSync(cmd, args, {
     env: env,
+    // ignore stdin, capture stdout, stream stderr to the parent
     stdio: ['ignore', 'pipe', 'inherit'],
   })
 
@@ -77,13 +84,33 @@ function main() {
 
       const delim = `delim_${crypto.randomUUID()}`;
       fs.appendFileSync(process.env.GITHUB_OUTPUT, `pushed_ref<<${delim}${os.EOL}${out}${os.EOL}${delim}`, { encoding: "utf8" });
+      process.exit(0);
     }
-
-    process.exit(exitCode)
+  } else {
+    console.error(`Child process exited uncleanly with signal ${child.signal || "unknown" }`);
+    if(child.error) {
+      console.error(`  error: ${child.error}`);
+    }
+    exitCode = 128;
   }
-  process.exit(1)
+
+  if(child.stdout) {
+    // commit-headless should never print anything to stdout *except* the pushed reference, but just
+    // in case we'll print whatever happens here
+    console.log("Child process output:");
+    console.log(child.stdout.toString().trim());
+    console.log();
+  }
+
+  process.exit(exitCode);
+
 }
 
 if (require.main === module) {
-  main()
+  try {
+    main()
+  } catch (exc) {
+    console.error(`Unhandled exception running action, got: ${exc.message}`);
+    process.exit(1);
+  }
 }
