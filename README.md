@@ -27,10 +27,17 @@ If your workflow creates multiple commits and you want to push all of them, you 
     git add bot.txt && git commit -m"bot commit 2"
 
     # List both commit hashes in reverse order, space separated
-    echo "commits=\"$(git log "${{ github.sha }}".. --format='%H%x00' | tr '\n' ' ')\"" >> $GITHUB_OUTPUT
+    echo "commits=\"$(git log "${{ github.sha }}".. --format='%H' | tr '\n' ' ')\"" >> $GITHUB_OUTPUT
+
+    # If you just have a single commit, you can do something like:
+    #  echo "commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+    # and then use it in the action via:
+    #  with:
+    #    ...
+    #    commits: ${{ steps.create-commits.outputs.commit }}
 
 - name: Push commits
-  uses: DataDog/commit-headless@action/v0.5.0
+  uses: DataDog/commit-headless@action/v0.5.1
   with:
     token: ${{ github.token }} # default
     target: ${{ github.repository }} # default
@@ -66,7 +73,7 @@ single commit out of them. For that, you can use `commit-headless commit`:
     echo "files=\"${files}\"" >> $GITHUB_OUTPUT
 
 - name: Create commit
-  uses: DataDog/commit-headless@action/v0.5.0
+  uses: DataDog/commit-headless@action/v0.5.1
   with:
     token: ${{ github.token }} # default
     target: ${{ github.repository }} # default
