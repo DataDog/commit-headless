@@ -37,7 +37,7 @@ If your workflow creates multiple commits and you want to push all of them, you 
     #    commits: ${{ steps.create-commits.outputs.commit }}
 
 - name: Push commits
-  uses: DataDog/commit-headless@action/v0.5.1
+  uses: DataDog/commit-headless@action/v0.5.2
   with:
     token: ${{ github.token }} # default
     target: ${{ github.repository }} # default
@@ -73,7 +73,7 @@ single commit out of them. For that, you can use `commit-headless commit`:
     echo "files=\"${files}\"" >> $GITHUB_OUTPUT
 
 - name: Create commit
-  uses: DataDog/commit-headless@action/v0.5.1
+  uses: DataDog/commit-headless@action/v0.5.2
   with:
     token: ${{ github.token }} # default
     target: ${{ github.repository }} # default

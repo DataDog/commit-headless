@@ -80,6 +80,7 @@ function main() {
 
   const child = childProcess.spawnSync(cmd, args, {
     env: env,
+    cwd: process.env["INPUT_WORKING-DIRECTORY"] || process.cwd(),
     // ignore stdin, capture stdout, stream stderr to the parent
     stdio: ['ignore', 'pipe', 'inherit'],
   })
