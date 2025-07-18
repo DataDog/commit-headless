@@ -251,12 +251,12 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 	}
 
 	if len(payload.Errors) != 0 {
-		fmt.Printf("There were %d errors returned when creating the commit.\n", len(payload.Errors))
-		fmt.Println("Input:")
-		fmt.Println(string(queryJSON))
-		for i, e := range payload.Errors {
-			fmt.Printf("Error %d: %s\n", i+1, e.Message)
+		log("There were %d errors returned when creating the commit.\n", len(payload.Errors))
+		for _, e := range payload.Errors {
+			log("  - %s\n", e.Message)
 		}
+
+		log("\nInput data, for reference: %s", string(queryJSON))
 		return "", errors.New("graphql response")
 	}
 

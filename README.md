@@ -12,6 +12,11 @@ mutation.
 When this API is used with a GitHub App token, the resulting commit will be signed and verified by
 GitHub on behalf of the application.
 
+*NOTE:* One limitation of creating commits using the GraphQL API is that it does not expose any
+mechanism to set or change file modes. It merely takes the file contents, base64 encoded. This means
+that if you rely on `commit-headless` to push binary files (or executable scripts), the file in the
+resulting commit will not retain that executable bit.
+
 [mutation]: https://docs.github.com/en/graphql/reference/mutations#createcommitonbranch
 [action-branch]: https://github.com/DataDog/commit-headless/tree/action
 
