@@ -51,6 +51,14 @@ function main() {
     args.push("--branch-from", branchFrom);
   }
 
+  const dryrun = process.env["INPUT_DRY-RUN"] || "false"
+  if(!["true", "false"].includes(dryrun.toLowerCase())) {
+    console.error(`Invalid value for dry-run (${dryrun}). Must be one of true or false.`);
+    process.exit(1);
+  }
+
+  if(dryrun.toLowerCase() === "true") { args.push("--dry-run") }
+
   if (command === "push") {
     args.push(...process.env.INPUT_COMMITS.split(/\s+/));
   } else {
