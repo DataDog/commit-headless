@@ -1,6 +1,6 @@
 schema-version: v2
 dd-service: commit-headless
-dd-team: devloops
+dd-team: dev-loops
 contacts:
   - type: slack
     contact: https://dd.enterprise.slack.com/archives/C04DW0M3Y3T
