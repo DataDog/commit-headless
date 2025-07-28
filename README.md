@@ -3,12 +3,13 @@
 A binary tool and GitHub Action for creating signed commits from headless workflows
 
 For the Action, please see [the action branch][action-branch] and the associated `action/`
-release tags.
+release tags. For example usage, see [Examples](#examples).
 
 `commit-headless` is focused on turning local commits into signed commits on the remote. It does
 this using the GitHub API, more specifically the [createCommitOnBranch][mutation] mutation. When
 commits are created using the API (instead of via `git push`), the commits will be signed and
 verified by GitHub on behalf of the owner of the credentials used to access the API.
+
 
 *NOTE:* One limitation of creating commits using the GraphQL API is that it does not expose any
 mechanism to set or change file modes. It merely takes the file contents, base64 encoded. This means
@@ -69,7 +70,7 @@ commit changes to, and those files will either be updated/added or deleted in a 
 
 Note that you cannot delete a file without also adding `--force` for safety reasons.
 
-Examples:
+Usage example:
 
     # Commit changes to these two files
     commit-headless commit [flags...] -- README.md .gitlab-ci.yml
@@ -102,6 +103,26 @@ HEADLESS_TOKEN=$(ddtool auth github token) commit-headless push \
     --branch-from="$(git rev-parse HEAD^)" \ # use the previous commit as our branch point
     "$(git rev-parse HEAD)" # push the commit we just created
 ```
+
+## Examples
+
+- This repository uses the action to [release itself][usage-action].
+- DataDog/service-discovery-platform uses it to [update bazel dependencies][usage-service-disco].
+- DataDog/web-ui, DataDog/profiling-backend, and DataDog/dogweb all use it [for the weekly staging reset][usage-staging-reset].
+- DataDog/web-ui uses it for the [Automated packages lint fix][usage-web-ui-lint] PR commits.
+- DataDog/cloud-tf-ci uses it for [updating the terraform CI image][usage-cloud-tf-ci].
+- DataDog/k8s-platform-resources uses it [to bump Chart versions][usage-k8s-p-r].
+- DataDog/datadog-vscode uses the action to [replicate README changes into the public repository][usage-vscode].
+- DataDog/websites-astro uses the action to [update some site content][usage-websites-astro].
+
+[usage-action]: /.github/workflows/release.yml
+[usage-service-disco]: https://github.com/DataDog/service-discovery-platform/pull/10615
+[usage-staging-reset]: https://github.com/DataDog/dogweb/pull/145992
+[usage-web-ui-lint]:  https://github.com/DataDog/web-ui/pull/219111
+[usage-cloud-tf-ci]: https://github.com/DataDog/cloud-tf-ci/pull/556
+[usage-k8s-p-r]: https://github.com/DataDog/k8s-platform-resources/pull/16307
+[usage-vscode]: https://github.com/DataDog/datadog-vscode/blob/main/.github/actions/readme/action.yaml
+[usage-websites-astro]: https://github.com/DataDog/websites-astro/blob/main/.github/workflows/update-content.yml
 
 ## Releasing
 
