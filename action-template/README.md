@@ -46,6 +46,32 @@ If your workflow creates multiple commits and you want to push all of them, you 
     commits: "${{ steps.create-commits.outputs.commits }}"
 ```
 
+If you primarily create commits on *new* branches, you'll want to use the `branch-from` option. This
+example creates a commit with the current time in a file, and then pushes it to a branch named
+`build-timestamp`, creating it from the current commit hash if the branch doesn't exist.
+
+```
+- name: Create commits
+  id: create-commits
+  run: |
+    git config --global user.name "A U Thor"
+    git config --global user.email "author@example.com"
+
+    echo "BUILD-TIMESTAMP-RFC3339: $(date --rfc-3339=s)" > last-build.txt
+    git add last-build.txt && git commit -m"update build timestamp"
+
+    # Store the created commit as a step output
+    echo "commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+- name: Push commits
+  uses: DataDog/commit-headless@action/v%%VERSION%%
+  with:
+    branch: build-timestamp
+    branch-from: ${{ github.sha }}
+    command: push
+    commits: "${{ steps.create-commits.outputs.commit }}"
+```
+
 ## Usage (commit-headless commit)
 
 Some workflows may just have a specific set of files that they change and just want to create a
@@ -75,8 +101,6 @@ single commit out of them. For that, you can use `commit-headless commit`:
 - name: Create commit
   uses: DataDog/commit-headless@action/v%%VERSION%%
   with:
-    token: ${{ github.token }} # default
-    target: ${{ github.repository }} # default
     branch: ${{ github.ref_name }}
     author: "A U Thor <author@example.com>" # defaults to the github-actions bot account
     message: "a commit message"

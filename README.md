@@ -3,14 +3,13 @@
 A binary tool and GitHub Action for creating signed commits from headless workflows
 
 For the Action, please see [the action branch][action-branch] and the associated `action/`
-release tags.
+release tags. For example usage, see [Examples](#examples).
 
-`commit-headless` is focused on turning local commits (or dirty files) into signed commits on the
-remote. It does this via the GitHub GraphQL API, more specifically the [createCommitOnBranch][mutation]
-mutation.
+`commit-headless` is focused on turning local commits into signed commits on the remote. It does
+this using the GitHub API, more specifically the [createCommitOnBranch][mutation] mutation. When
+commits are created using the API (instead of via `git push`), the commits will be signed and
+verified by GitHub on behalf of the owner of the credentials used to access the API.
 
-When this API is used with a GitHub App token, the resulting commit will be signed and verified by
-GitHub on behalf of the application.
 
 *NOTE:* One limitation of creating commits using the GraphQL API is that it does not expose any
 mechanism to set or change file modes. It merely takes the file contents, base64 encoded. This means
@@ -71,7 +70,7 @@ commit changes to, and those files will either be updated/added or deleted in a 
 
 Note that you cannot delete a file without also adding `--force` for safety reasons.
 
-Examples:
+Usage example:
 
     # Commit changes to these two files
     commit-headless commit [flags...] -- README.md .gitlab-ci.yml
@@ -86,47 +85,44 @@ Examples:
 
 ## Try it!
 
-You can try `commit-headless` locally. The resulting commits will be authored and committed by you.
-The commits on `bot-branch-remote` in this repository were entirely created via this tool based on
-local commits created like so:
+You can easily try `commit-headless` locally. Create a commit with a different author (to
+demonstrate how commit-headless attributes changes to the original author), and run it with a GitHub
+token.
 
-    git commit --no-gpg-sign --author='Bot <bot@mailinator.com>'
+For example, create a commit locally and push it to a new branch using the current branch as the
+branch point:
 
-## Example output
-
-The below output was generated from `commit-headless` running on some local commits to the
-`bot-branch-remote` branch.
-
-All output other than the final commit hash printed at the end is written to stderr, and can be
-redirected to a file.
-
-```sh
-Owner: datadog
-Repository: commit-headless
-Branch: bot-branch-remote
-Commits: 7e94985, 89c7296, b89e749, 9a1a616
-Current head commit: 84485a25ea7cac03d42eb1571d4d46974ade837b
-Commit 7e94985979a76a9ef72248007c118dc565bc5715
-  Headline: bot: update README.md
-  Changed files: 1
-    - MODIFY: README.md
-Commit 89c7296eafeefb6165edf0b27e8b287f4695724e
-  Headline: bot: add botfile.txt
-  Changed files: 1
-    - MODIFY: botfile.txt
-Commit b89e7494601c5f001bf923386edc4e9cf7d8ec76
-  Headline: bot: remove botfile.txt
-  Changed files: 1
-    - DELETE: botfile.txt
-Commit 9a1a616c80c44b228e2890b811490a40beb198b9
-  Headline: bot: rename README.md -> README.markdown
-  Changed files: 2
-    - DELETE: README.md
-    - MODIFY: README.markdown
-Pushed 4 commits.
-Branch URL: https://github.com/datadog/commit-headless/commits/bot-branch-remote
-281ff0fa1204e93c8931a774c6ebe2c69e66eddd
 ```
+cd ~/Code/repo
+echo "bot commit here" >> README.md
+git add README.md
+git commit --author='A U Thor <author@example.com>' --message="test bot commit"
+HEADLESS_TOKEN=$(ddtool auth github token) commit-headless push \
+    --target=owner/repo \
+    --branch=bot-branch \
+    --branch-from="$(git rev-parse HEAD^)" \ # use the previous commit as our branch point
+    "$(git rev-parse HEAD)" # push the commit we just created
+```
+
+## Examples
+
+- This repository uses the action to [release itself][usage-action].
+- DataDog/service-discovery-platform uses it to [update bazel dependencies][usage-service-disco].
+- DataDog/web-ui, DataDog/profiling-backend, and DataDog/dogweb all use it [for the weekly staging reset][usage-staging-reset].
+- DataDog/web-ui uses it for the [Automated packages lint fix][usage-web-ui-lint] PR commits.
+- DataDog/cloud-tf-ci uses it for [updating the terraform CI image][usage-cloud-tf-ci].
+- DataDog/k8s-platform-resources uses it [to bump Chart versions][usage-k8s-p-r].
+- DataDog/datadog-vscode uses the action to [replicate README changes into the public repository][usage-vscode].
+- DataDog/websites-astro uses the action to [update some site content][usage-websites-astro].
+
+[usage-action]: /.github/workflows/release.yml
+[usage-service-disco]: https://github.com/DataDog/service-discovery-platform/pull/10615
+[usage-staging-reset]: https://github.com/DataDog/dogweb/pull/145992
+[usage-web-ui-lint]:  https://github.com/DataDog/web-ui/pull/219111
+[usage-cloud-tf-ci]: https://github.com/DataDog/cloud-tf-ci/pull/556
+[usage-k8s-p-r]: https://github.com/DataDog/k8s-platform-resources/pull/16307
+[usage-vscode]: https://github.com/DataDog/datadog-vscode/blob/main/.github/actions/readme/action.yaml
+[usage-websites-astro]: https://github.com/DataDog/websites-astro/blob/main/.github/workflows/update-content.yml
 
 ## Releasing
 
@@ -148,3 +144,14 @@ $ crane ls registry.ddbuild.io/commit-headless-ci-image
 
 Note that the final publish job will fail unless there was also a change to `version.go` to avoid
 overwriting existing releases.
+
+## Releasing the Action
+
+The action release is simlar to the above process, although driven by a GitHub Workflow (see
+`.github/workflows/release.yml`). When a change is made to the default branch, the contents of
+`action-template/` are used to create a new commit on the `action` branch.
+
+Because the workflow uses the rendered action (and the built binary) to create the commit to the
+action branch we are fairly safe from releasing a broken version of the action.
+
+Assuming the previous step works, the workflow will then create a tag of the form `action/vVERSION`.
