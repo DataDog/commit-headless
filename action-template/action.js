@@ -46,10 +46,18 @@ function main() {
     "--branch", process.env.INPUT_BRANCH
   ];
 
-  const branchFrom = process.env["INPUT_BRANCH-FROM"] || "";
-  if (branchFrom !== "") {
-    args.push("--branch-from", branchFrom);
+  const headSha = process.env["INPUT_HEAD-SHA"] || "";
+  if (headSha !== "") {
+    args.push("--head-sha", headSha);
   }
+
+  const createBranch = process.env["INPUT_CREATE-BRANCH"] || "false"
+  if(!["true", "false"].includes(createBranch.toLowerCase())) {
+    console.error(`Invalid value for create-branch (${createBranch}). Must be one of true or false.`);
+    process.exit(1);
+  }
+
+  if(createBranch.toLowerCase() === "true") { args.push("--create-branch") }
 
   const dryrun = process.env["INPUT_DRY-RUN"] || "false"
   if(!["true", "false"].includes(dryrun.toLowerCase())) {

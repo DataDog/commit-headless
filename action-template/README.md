@@ -46,7 +46,7 @@ If your workflow creates multiple commits and you want to push all of them, you 
     commits: "${{ steps.create-commits.outputs.commits }}"
 ```
 
-If you primarily create commits on *new* branches, you'll want to use the `branch-from` option. This
+If you primarily create commits on *new* branches, you'll want to use the `create-branch` option. This
 example creates a commit with the current time in a file, and then pushes it to a branch named
 `build-timestamp`, creating it from the current commit hash if the branch doesn't exist.
 
@@ -67,7 +67,8 @@ example creates a commit with the current time in a file, and then pushes it to 
   uses: DataDog/commit-headless@action/v%%VERSION%%
   with:
     branch: build-timestamp
-    branch-from: ${{ github.sha }}
+    head-sha: ${{ github.sha }}
+    create-branch: true
     command: push
     commits: "${{ steps.create-commits.outputs.commit }}"
 ```

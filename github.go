@@ -12,6 +12,8 @@ import (
 	"golang.org/x/oauth2"
 )
 
+var ErrNoRemoteBranch = errors.New("branch does not exist on the remote")
+
 // Client provides methods for interacting with a remote repository on GitHub
 type Client struct {
 	httpC  *http.Client
@@ -61,8 +63,7 @@ func (c *Client) graphqlURL() string {
 }
 
 // GetHeadCommitHash returns the current head commit hash for the configured repository and branch
-// If the branch does not exist (404 return), we'll attempt to create it from commit branchFrom
-func (c *Client) GetHeadCommitHash(ctx context.Context, branchFrom string) (string, error) {
+func (c *Client) GetHeadCommitHash(ctx context.Context) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.branchURL(), nil)
 	if err != nil {
 		return "", fmt.Errorf("prepare http request: %w", err)
@@ -75,11 +76,7 @@ func (c *Client) GetHeadCommitHash(ctx context.Context, branchFrom string) (stri
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		if branchFrom != "" {
-			return c.createBranch(ctx, branchFrom)
-		}
-
-		return "", fmt.Errorf("branch %q does not exist on the remote", c.branch)
+		return "", fmt.Errorf("get branch %q: %w", c.branch, ErrNoRemoteBranch)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -99,15 +96,15 @@ func (c *Client) GetHeadCommitHash(ctx context.Context, branchFrom string) (stri
 	return payload.Commit.Sha, nil
 }
 
-// createBranch attempts to create c.branch using branchFrom as the branch point
-func (c *Client) createBranch(ctx context.Context, branchFrom string) (string, error) {
-	log("Creating branch from commit %s\n", branchFrom)
+// CreateBranch attempts to create c.branch using headSha as the branch point
+func (c *Client) CreateBranch(ctx context.Context, headSha string) (string, error) {
+	log("Creating branch from commit %s\n", headSha)
 
 	var input bytes.Buffer
 
 	err := json.NewEncoder(&input).Encode(map[string]string{
 		"ref": fmt.Sprintf("refs/heads/%s", c.branch),
-		"sha": branchFrom,
+		"sha": headSha,
 	})
 	if err != nil {
 		return "", err
@@ -256,7 +253,6 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 			log("  - %s\n", e.Message)
 		}
 
-		log("\nInput data, for reference: %s", string(queryJSON))
 		return "", errors.New("graphql response")
 	}
 

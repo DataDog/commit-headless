@@ -86,5 +86,5 @@ func (c *CommitCmd) Run() error {
 
 	owner, repository := c.Target.Owner(), c.Target.Repository()
 
-	return pushChanges(context.Background(), owner, repository, c.Branch, c.BranchFrom, c.DryRun, change)
+	return pushChanges(context.Background(), owner, repository, c.Branch, c.HeadSha, c.CreateBranch, c.DryRun, change)
 }
