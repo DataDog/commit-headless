@@ -21,8 +21,11 @@ inputs:
     required: true
   working-directory:
     description: 'Switch to this directory before running commit-headless. Useful if you need to commit changes to a secondary repository.'
-  branch-from:
-    description: 'If necessary, create the remote branch using this commit hash as the branch point.'
+  head-sha:
+    description: 'Expected commit sha of the remote branch, or the commit sha to branch from.'
+  create-branch:
+    description: 'Create the remote branch, using head-sha as the branch point.'
+    default: false
   command:
     description: 'Command to run. One of "commit" or "push"'
     required: true
