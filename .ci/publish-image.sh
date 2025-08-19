@@ -10,7 +10,7 @@ if command -v gtar >/dev/null 2>&1; then
 fi;
 
 BASE_IMAGE_REPO="registry.ddbuild.io/images/dd-octo-sts-ci-base"
-BASE_TAG="2025.06-1"
+BASE_TAG="2025.07-1"
 BASE_IMAGE="${BASE_IMAGE_REPO}:${BASE_TAG}"
 
 # TODO: Let this run without depending on the release pipeline so it can be scheduled. It can use
