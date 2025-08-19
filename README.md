@@ -31,17 +31,39 @@ token in one of the following environment variables:
 - GITHUB_TOKEN
 - GH_TOKEN
 
-Note that, by default, both of these commands expect the remote branch to already exist. If your
-workflow primarily works on *new* branches, you should additionally add the `--branch-from` flag and
-supply a commit hash to use as a branch point. With this flag, `commit-headless` will create the
-branch on GitHub from that commit hash if it doesn't already exist.
-
-Example: `commit-headless <command> [flags...] --branch-from=$(git rev-parse main HEAD) ...`
-
 In normal usage, `commit-headless` will print *only* the reference to the last commit created on the
 remote, allowing this to easily be captured in a script.
 
 More on the specifics for each command below. See also: `commit-headless <command> --help`
+
+### Specifying the expected head commit
+
+When creating remote commits via API, `commit-headless` must specify the "expected head sha" of the
+remote branch. By default, `commit-headless` will query the GitHub API to get the *current* HEAD
+commit of the remote branch and use that as the "expected head sha". This introduces some risk,
+especially for active branches or long running jobs, as a new commit introduced after the job starts
+will not be considered when pushing the new commits. The commit itself will not be replaced, but the
+changes it introduces may be lost.
+
+For example, consider an auto-formatting job. It runs `gofmt` over the entire codebase. If the job
+starts on commit A and formats a file `main.go`, and while the job is running the branch gains
+commit B, which adds *new* changes to `main.go`, when the lint job finishes the formatted version of
+`main.go` from commit A will be pushed to the remote, and overwrite the changes to `main.go`
+introduced in commit B.
+
+You can avoid this by specifying `--head-sha`. This will skip auto discovery of the remote branch
+HEAD and instead require that the remote branch HEAD matches the value of `--head-sha`. If the
+remote branch HEAD does not match `--head-sha`, the push will fail (which is likely what you want).
+
+### Creating a new branch
+
+Note that, by default, both of these commands expect the remote branch to already exist. If your
+workflow primarily works on *new* branches, you should additionally add the `--create-branch` flag
+and supply a commit hash to use as a branch point via `--head-sha`. With this flag,
+`commit-headless` will create the branch on GitHub from that commit hash if it doesn't already
+exist.
+
+Example: `commit-headless <command> [flags...] --head-sha=$(git rev-parse main HEAD) --create-branch ...`
 
 ### commit-headless push
 
@@ -100,7 +122,8 @@ git commit --author='A U Thor <author@example.com>' --message="test bot commit"
 HEADLESS_TOKEN=$(ddtool auth github token) commit-headless push \
     --target=owner/repo \
     --branch=bot-branch \
-    --branch-from="$(git rev-parse HEAD^)" \ # use the previous commit as our branch point
+    --head-sha="$(git rev-parse HEAD^)" \ # use the previous commit as our branch point
+    --create-branch \
     "$(git rev-parse HEAD)" # push the commit we just created
 ```
 

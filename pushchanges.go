@@ -10,7 +10,7 @@ import (
 
 // Takes a list of changes to push to the remote identified by target.
 // Prints the last commit pushed to standard output.
-func pushChanges(ctx context.Context, owner, repository, branch, branchFrom string, dryrun bool, changes ...Change) error {
+func pushChanges(ctx context.Context, owner, repository, branch, headSha string, createBranch, dryrun bool, changes ...Change) error {
 	hashes := []string{}
 	for i := 0; i < len(changes) && i < 10; i++ {
 		hashes = append(hashes, changes[i].hash)
@@ -25,8 +25,12 @@ func pushChanges(ctx context.Context, owner, repository, branch, branchFrom stri
 	log("Branch: %s\n", branch)
 	log("Commits: %s\n", strings.Join(hashes, ", "))
 
-	if branchFrom != "" && (!hashRegex.MatchString(branchFrom) || len(branchFrom) != 40) {
-		return fmt.Errorf("cannot branch from %q, must be a full 40 hex digit commit hash", branchFrom)
+	if headSha != "" && (!hashRegex.MatchString(headSha) || len(headSha) != 40) {
+		return fmt.Errorf("invalid head-sha %q, must be a full 40 hex digit commit hash", headSha)
+	}
+
+	if createBranch && headSha == "" {
+		return errors.New("cannot use --create-branch without supplying --head-sha")
 	}
 
 	token := getToken(os.Getenv)
@@ -37,12 +41,21 @@ func pushChanges(ctx context.Context, owner, repository, branch, branchFrom stri
 	client := NewClient(ctx, token, owner, repository, branch)
 	client.dryrun = dryrun
 
-	headRef, err := client.GetHeadCommitHash(context.Background(), branchFrom)
-	if err != nil {
-		return err
+	if headSha == "" {
+		remoteSha, err := client.GetHeadCommitHash(context.Background())
+		if err != nil {
+			return err
+		}
+		headSha = remoteSha
+	} else if createBranch {
+		remoteSha, err := client.CreateBranch(ctx, headSha)
+		if err != nil {
+			return err
+		}
+		headSha = remoteSha
 	}
 
-	log("Current head commit: %s\n", headRef)
+	log("Remote head commit: %s\n", headSha)
 	for _, c := range changes {
 		log("Commit %s\n", c.hash)
 		log("  Headline: %s\n", c.Headline())
@@ -57,7 +70,7 @@ func pushChanges(ctx context.Context, owner, repository, branch, branchFrom stri
 		}
 	}
 
-	pushed, newHead, err := client.PushChanges(ctx, headRef, changes...)
+	pushed, newHead, err := client.PushChanges(ctx, headSha, changes...)
 	if err != nil {
 		return err
 	} else if pushed != len(changes) {

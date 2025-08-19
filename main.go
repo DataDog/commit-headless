@@ -42,10 +42,11 @@ func (f targetFlag) Repository() string {
 
 // flags that are shared among commands that interact with the remote
 type remoteFlags struct {
-	Target     targetFlag `name:"target" short:"T" required:"" help:"Target repository in owner/repo format."`
-	Branch     string     `required:"" help:"Name of the target branch on the remote."`
-	BranchFrom string     `help:"If necessary, create the remote branch using this commit sha."`
-	DryRun     bool       `name:"dry-run" help:"Perform everything except the final remote writes to GitHub."`
+	Target       targetFlag `name:"target" short:"T" required:"" help:"Target repository in owner/repo format."`
+	Branch       string     `required:"" help:"Name of the target branch on the remote."`
+	HeadSha      string     `name:"head-sha" help:"Expected commit sha of the remote branch, or the commit sha to branch from."`
+	CreateBranch bool       `name:"create-branch" help:"Create the remote branch, requires --head-sha to be set."`
+	DryRun       bool       `name:"dry-run" help:"Perform everything except the final remote writes to GitHub."`
 }
 
 type CLI struct {
