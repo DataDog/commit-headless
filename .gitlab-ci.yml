@@ -10,7 +10,6 @@ variables:
   PUBLISH_IMAGE_REPO: "registry.ddbuild.io/commit-headless"
 
   # Setup the go environment variables, primarily GOPROXY
-  # XXX: Taken from dd-go/.mm/go/gitlab.gomod.yml
   GOPROXY: "https://depot-read-api-go.us1.ddbuild.io/magicmirror/magicmirror/@current/|https://depot-read-api-go.us1.ddbuild.io/magicmirror/testing/@current/"
   GONOSUMDB: "github.com/DataDog,go.ddbuild.io"
   GOPRIVATE: ""
