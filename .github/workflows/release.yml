@@ -38,6 +38,9 @@ jobs:
       id: create-commit
       run: |
 
+        # Capture the current HEAD commit subject (used for the action commit later)
+        subject="$(git show -s --format="%s" HEAD)"
+
         # Copy the new assets to a temporary location that we can recover later
         cp -R dist /tmp/release-assets
 
@@ -49,8 +52,9 @@ jobs:
         # Bring back the release assets
         mv /tmp/release-assets dist
 
-        # "Restore" the contents of action-template from the previous ref
+        # Restore a few important files, including the action template, from the previous ref
         git restore --source "${{ github.sha }}" action-template/
+        git restore --source "${{ github.sha }}" LICENSE NOTICE LICENSE-3rdparty.csv
 
         # Copy the contents of action-template to the top of the repository
         cp action-template/* . && rm -rf action-template
@@ -64,12 +68,10 @@ jobs:
         git status
 
         # Create a commit
-        # TODO: A merge should have the PR number in the commit headline, if we use the original
-        # commit message it should back-link
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com>"
         git commit \
-          --message="Update action from ${{ github.sha }}" \
+          --message="action: ${subject}" \
           --allow-empty # sometimes we have nothing to change, so this ensures we can still commit
 
         REF=$(git rev-parse HEAD)

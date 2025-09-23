@@ -1,0 +1,3 @@
+Component,Origin,License,Copyright
+core,github.com/alecthomas/kong,MIT,Copyright 2018 Alec Thomas
+core,golang.org/x/oauth2,BSD-3-Clause,Copyright 2009 The Go Authors

@@ -119,7 +119,8 @@ cd ~/Code/repo
 echo "bot commit here" >> README.md
 git add README.md
 git commit --author='A U Thor <author@example.com>' --message="test bot commit"
-HEADLESS_TOKEN=$(ddtool auth github token) commit-headless push \
+# Assuming a github token in $GITHUB_TOKEN or $HEADLESS_TOKEN
+commit-headless push \
     --target=owner/repo \
     --branch=bot-branch \
     --head-sha="$(git rev-parse HEAD^)" \ # use the previous commit as our branch point
@@ -129,23 +130,10 @@ HEADLESS_TOKEN=$(ddtool auth github token) commit-headless push \
 
 ## Examples
 
-- This repository uses the action to [release itself][usage-action].
-- DataDog/service-discovery-platform uses it to [update bazel dependencies][usage-service-disco].
-- DataDog/web-ui, DataDog/profiling-backend, and DataDog/dogweb all use it [for the weekly staging reset][usage-staging-reset].
-- DataDog/web-ui uses it for the [Automated packages lint fix][usage-web-ui-lint] PR commits.
-- DataDog/cloud-tf-ci uses it for [updating the terraform CI image][usage-cloud-tf-ci].
-- DataDog/k8s-platform-resources uses it [to bump Chart versions][usage-k8s-p-r].
-- DataDog/datadog-vscode uses the action to [replicate README changes into the public repository][usage-vscode].
-- DataDog/websites-astro uses the action to [update some site content][usage-websites-astro].
+Note: Most examples are currently on internal repositories. However, this repository does use the
+action to [release itself][usage-action].
 
 [usage-action]: /.github/workflows/release.yml
-[usage-service-disco]: https://github.com/DataDog/service-discovery-platform/pull/10615
-[usage-staging-reset]: https://github.com/DataDog/dogweb/pull/145992
-[usage-web-ui-lint]:  https://github.com/DataDog/web-ui/pull/219111
-[usage-cloud-tf-ci]: https://github.com/DataDog/cloud-tf-ci/pull/556
-[usage-k8s-p-r]: https://github.com/DataDog/k8s-platform-resources/pull/16307
-[usage-vscode]: https://github.com/DataDog/datadog-vscode/blob/main/.github/actions/readme/action.yaml
-[usage-websites-astro]: https://github.com/DataDog/websites-astro/blob/main/.github/workflows/update-content.yml
 
 ## Releasing
 
@@ -156,6 +144,9 @@ Prerelease occurs automatically on a push to main, or can be manually triggered 
 
 Additionally, on main, the `release:publish` job will run. This job takes the prerelease image and
 tags it for release, as well as produces a CI image with various other tools.
+
+*Note:* All images are published to an internal only registry. Public usage should build from source
+or use the Action.
 
 You can view all releases (and prereleases) with crane:
 

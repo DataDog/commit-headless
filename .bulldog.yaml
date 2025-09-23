@@ -1,6 +1,0 @@
-modules:
-  .:
-    module_type: CLI
-    providers:
-      docker:
-        generate_blob: true
