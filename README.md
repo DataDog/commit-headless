@@ -128,44 +128,17 @@ commit-headless push \
     "$(git rev-parse HEAD)" # push the commit we just created
 ```
 
-## Examples
+## Action Releases
 
-Note: Most examples are currently on internal repositories. However, this repository does use the
-action to [release itself][usage-action].
+On a merge to main, if there's not already a tagged release for the current version (in
+`version.go`), a new tag will be created on the action branch.
 
-[usage-action]: /.github/workflows/release.yml
-
-## Releasing
-
-The release process has two parts to it: prerelease and publish.
-
-Prerelease occurs automatically on a push to main, or can be manually triggered by the
-`release:build` job on any branch.
-
-Additionally, on main, the `release:publish` job will run. This job takes the prerelease image and
-tags it for release, as well as produces a CI image with various other tools.
-
-*Note:* All images are published to an internal only registry. Public usage should build from source
-or use the Action.
-
-You can view all releases (and prereleases) with crane:
-
-```
-$ crane ls registry.ddbuild.io/commit-headless-prerelease
-$ crane ls registry.ddbuild.io/commit-headless
-$ crane ls registry.ddbuild.io/commit-headless-ci-image
-```
-
-Note that the final publish job will fail unless there was also a change to `version.go` to avoid
-overwriting existing releases.
-
-## Releasing the Action
-
-The action release is simlar to the above process, although driven by a GitHub Workflow (see
-`.github/workflows/release.yml`). When a change is made to the default branch, the contents of
-`action-template/` are used to create a new commit on the `action` branch.
+The action branch contains prebuilt binaries of `commit-headless` to avoid having to use Docker
+based (composite) actions, or to avoid having to download the binary when the action runs.
 
 Because the workflow uses the rendered action (and the built binary) to create the commit to the
 action branch we are fairly safe from releasing a broken version of the action.
 
 Assuming the previous step works, the workflow will then create a tag of the form `action/vVERSION`.
+
+For more on the action release, see the [workflow](.github/workflows/release.yml).
