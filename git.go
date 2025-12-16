@@ -139,14 +139,14 @@ func (r *Repository) changedFiles(commit string) (map[string][]byte, error) {
 			changes[value] = contents
 		case strings.HasPrefix(status, "R"): // Renames may have a similarity score after the R
 			from, to, _ := strings.Cut(value, "\t")
-			changes[from] = []byte{}
+			changes[from] = nil
 			contents, err := r.fileContent(commit, to)
 			if err != nil {
 				return nil, fmt.Errorf("get content %s:%s: %w", commit, to, err)
 			}
 			changes[to] = contents
 		case status == "D":
-			changes[value] = []byte{}
+			changes[value] = nil
 		}
 	}
 

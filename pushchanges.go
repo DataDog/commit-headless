@@ -63,7 +63,7 @@ func pushChanges(ctx context.Context, owner, repository, branch, headSha string,
 		log("  Changed files: %d\n", len(c.entries))
 		for p, content := range c.entries {
 			action := "MODIFY"
-			if len(content) == 0 {
+			if content == nil {
 				action = "DELETE"
 			}
 			log("    - %s: %s\n", action, p)

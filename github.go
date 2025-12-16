@@ -167,7 +167,7 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 	deleted := []fileChange{}
 
 	for path, content := range change.entries {
-		if len(content) == 0 {
+		if content == nil {
 			deleted = append(deleted, fileChange{
 				Path: path,
 			})
