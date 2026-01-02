@@ -1,6 +1,11 @@
 package main
 
 import (
+	"maps"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -12,17 +17,49 @@ func requireNoError(t *testing.T, err error, msg ...any) {
 		return
 	}
 
-	if len(msg) == 0 {
-		t.Fatalf("expected no error, got: %s", err.Error())
-		return
-	}
-
 	if len(msg) == 1 {
-		t.Fatal(msg[0].(string))
-		return
+		t.Log(msg[0].(string))
+	} else if len(msg) > 1 {
+		t.Logf(msg[0].(string), msg[1:]...)
 	}
 
-	t.Fatalf(msg[0].(string), msg[1:]...)
+	if ee, ok := err.(*exec.ExitError); ok {
+		t.Log("STDERR:", string(ee.Stderr))
+	}
+
+	t.Fatalf("expected no error, got: %s", err.Error())
+}
+
+type testRepository struct {
+	t    *testing.T
+	root string
+}
+
+func (tr *testRepository) init() {
+	tr.root = tr.t.TempDir()
+	tr.git("init")
+	tr.git("config", "user.name", "A U Thor")
+	tr.git("config", "user.email", "author@home.arpa")
+}
+
+func (tr *testRepository) git(args ...string) []byte {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = tr.root
+	out, err := cmd.Output()
+	requireNoError(tr.t, err)
+	return out
+}
+
+func (tr *testRepository) path(p ...string) string {
+	return filepath.Join(append([]string{tr.root}, p...)...)
+}
+
+func testRepo(t *testing.T) *testRepository {
+	t.Helper()
+
+	tr := &testRepository{t: t}
+	tr.init()
+	return tr
 }
 
 func TestCommitHashes(t *testing.T) {
@@ -58,61 +95,51 @@ func TestCommitHashes(t *testing.T) {
 	}
 }
 
-func TestEmptyFileVsDeletedFile(t *testing.T) {
-	testcases := []struct {
-		name      string
-		content   []byte
-		isDeleted bool
-	}{
-		{
-			name:      "nil content means deleted",
-			content:   nil,
-			isDeleted: true,
-		},
-		{
-			name:      "empty byte slice means empty file (not deleted)",
-			content:   []byte{},
-			isDeleted: false,
-		},
-		{
-			name:      "file with content is not deleted",
-			content:   []byte("hello world"),
-			isDeleted: false,
-		},
+func TestChangedFiles(t *testing.T) {
+	// First, prep the test repository
+	tr := testRepo(t)
+
+	requireNoError(t, os.WriteFile(tr.path("file"), []byte("content"), 0o644))
+	requireNoError(t, os.WriteFile(tr.path("to-empty"), []byte("content"), 0o644))
+	requireNoError(t, os.WriteFile(tr.path("to-delete"), []byte("content"), 0o644))
+
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "initial commit")
+
+	requireNoError(t, os.Truncate(tr.path("to-empty"), 0))
+	requireNoError(t, os.Remove(tr.path("to-delete")))
+
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "second commit")
+	hash := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+	r := &Repository{path: tr.root}
+
+	changes, err := r.Changes(hash)
+	requireNoError(t, err)
+
+	if len(changes) != 1 {
+		t.Fatalf("expected 1 change, got %d", len(changes))
 	}
 
-	for _, tc := range testcases {
-		t.Run(tc.name, func(t *testing.T) {
-			change := Change{
-				hash:    "deadbeef",
-				author:  "Test Author <test@example.com>",
-				message: "test commit",
-				entries: map[string][]byte{
-					"testfile.txt": tc.content,
-				},
-			}
+	change := changes[0]
 
-			// Simulate what github.go does to determine if a file is deleted
-			isDeleted := change.entries["testfile.txt"] == nil
+	if len(change.entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(change.entries))
+	}
 
-			if isDeleted != tc.isDeleted {
-				t.Errorf("expected isDeleted=%v, got=%v for content=%v", tc.isDeleted, isDeleted, tc.content)
-			}
+	keys := slices.Sorted(maps.Keys(change.entries))
+	if keys[0] != "to-delete" || keys[1] != "to-empty" {
+		t.Fatalf("expected changed files to be 'to-delete' and 'to-empty', got %q", keys)
+	}
 
-			// Verify that empty files are distinguishable from deleted files
-			if tc.isDeleted {
-				if change.entries["testfile.txt"] != nil {
-					t.Error("deleted files should have nil content")
-				}
-			} else if tc.content != nil && len(tc.content) == 0 {
-				// This is an empty file
-				if change.entries["testfile.txt"] == nil {
-					t.Error("empty files should not have nil content")
-				}
-				if len(change.entries["testfile.txt"]) != 0 {
-					t.Error("empty files should have zero-length content")
-				}
-			}
-		})
+	if change.entries["to-empty"] == nil {
+		t.Log("expected to-empty to be empty, not nil")
+		t.Fail()
+	}
+
+	if change.entries["to-delete"] != nil {
+		t.Logf("expected to-delete to be nil, got %q", change.entries["to-delete"])
+		t.Fail()
 	}
 }

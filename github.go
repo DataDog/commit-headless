@@ -159,13 +159,8 @@ func (c *Client) PushChanges(ctx context.Context, headCommit string, changes ...
 	return len(changes), headCommit, nil
 }
 
-// PushChange pushes a single change using the GraphQL API.
-// It returns the hash of the pushed commit or an error.
-func (c *Client) PushChange(ctx context.Context, headCommit string, change Change) (string, error) {
-	// Turn the change into a createCommitOnBranchInput
-	added := []fileChange{}
-	deleted := []fileChange{}
-
+// Splits a Change into added and deleted slices, taking into account existing files vs empty files
+func (c *Client) splitChange(change Change) (added, deleted []fileChange) {
 	for path, content := range change.entries {
 		if content == nil {
 			deleted = append(deleted, fileChange{
@@ -178,6 +173,15 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 			})
 		}
 	}
+
+	return added, deleted
+}
+
+// PushChange pushes a single change using the GraphQL API.
+// It returns the hash of the pushed commit or an error.
+func (c *Client) PushChange(ctx context.Context, headCommit string, change Change) (string, error) {
+	// Turn the change into a createCommitOnBranchInput
+	added, deleted := c.splitChange(change)
 
 	input := createCommitOnBranchInput{
 		Branch: commitInputBranch{
