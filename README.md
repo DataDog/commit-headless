@@ -37,7 +37,7 @@ If your workflow creates multiple commits and you want to push all of them, you 
     #    commits: ${{ steps.create-commits.outputs.commit }}
 
 - name: Push commits
-  uses: DataDog/commit-headless@action/v2.0.1
+  uses: DataDog/commit-headless@action/v2.0.2
   with:
     token: ${{ github.token }} # default
     target: ${{ github.repository }} # default
@@ -64,7 +64,7 @@ example creates a commit with the current time in a file, and then pushes it to 
     echo "commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
 - name: Push commits
-  uses: DataDog/commit-headless@action/v2.0.1
+  uses: DataDog/commit-headless@action/v2.0.2
   with:
     branch: build-timestamp
     head-sha: ${{ github.sha }}
@@ -100,7 +100,7 @@ single commit out of them. For that, you can use `commit-headless commit`:
     echo "files=\"${files}\"" >> $GITHUB_OUTPUT
 
 - name: Create commit
-  uses: DataDog/commit-headless@action/v2.0.1
+  uses: DataDog/commit-headless@action/v2.0.2
   with:
     branch: ${{ github.ref_name }}
     author: "A U Thor <author@example.com>" # defaults to the github-actions bot account
