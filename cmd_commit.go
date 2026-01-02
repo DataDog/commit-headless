@@ -70,7 +70,7 @@ func (c *CommitCmd) Run() error {
 				return fmt.Errorf("file %q does not exist, but --force was not set", path)
 			}
 
-			change.entries[path] = []byte{}
+			change.entries[path] = nil
 			continue
 		} else if err != nil {
 			return fmt.Errorf("could not open file %q: %w", path, err)
