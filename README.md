@@ -142,3 +142,7 @@ action branch we are fairly safe from releasing a broken version of the action.
 Assuming the previous step works, the workflow will then create a tag of the form `action/vVERSION`.
 
 For more on the action release, see the [workflow](.github/workflows/release.yml).
+
+## Internal Image Releases
+
+See the internal commit-headless-ci-config repository.
