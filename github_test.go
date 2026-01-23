@@ -17,19 +17,24 @@ func init() {
 	logger = NewLogger(io.Discard)
 }
 
+// newFileEntry creates a FileEntry with default mode 100644
+func newFileEntry(content []byte) FileEntry {
+	return FileEntry{Content: content, Mode: "100644"}
+}
+
 func TestBuildTreeEntries(t *testing.T) {
 	change := Change{
-		entries: map[string][]byte{
-			"a-file":  []byte("hello world"),
-			"b-empty": {},
-			"deleted": nil,
+		entries: map[string]FileEntry{
+			"a-file":  newFileEntry([]byte("hello world")),
+			"b-empty": newFileEntry([]byte{}),
+			"deleted": {Content: nil}, // deletion
 		},
 	}
 
 	// Build tree entries the same way PushChange does (without making API calls)
 	var addedPaths, deletedPaths []string
-	for path, content := range change.entries {
-		if content == nil {
+	for path, fe := range change.entries {
+		if fe.Content == nil {
 			deletedPaths = append(deletedPaths, path)
 		} else {
 			addedPaths = append(addedPaths, path)
@@ -197,8 +202,8 @@ func TestPushChange(t *testing.T) {
 		change := Change{
 			hash:    "abc123",
 			message: "Test commit",
-			entries: map[string][]byte{
-				"file.txt": []byte("content"),
+			entries: map[string]FileEntry{
+				"file.txt": newFileEntry([]byte("content")),
 			},
 		}
 
@@ -281,8 +286,8 @@ func TestPushChange(t *testing.T) {
 		change := Change{
 			hash:    "local-hash",
 			message: "Test commit",
-			entries: map[string][]byte{
-				"file.txt": []byte("content"),
+			entries: map[string]FileEntry{
+				"file.txt": newFileEntry([]byte("content")),
 			},
 		}
 
@@ -362,8 +367,8 @@ func TestPushChange(t *testing.T) {
 		change := Change{
 			hash:    "local-hash",
 			message: "Delete file",
-			entries: map[string][]byte{
-				"deleted-file.txt": nil, // nil means deletion
+			entries: map[string]FileEntry{
+				"deleted-file.txt": {Content: nil}, // deletion
 			},
 		}
 
@@ -424,7 +429,7 @@ func TestPushChange(t *testing.T) {
 		change := Change{
 			hash:    "local",
 			message: "Headline\n\nThis is the body\nwith multiple lines",
-			entries: map[string][]byte{"file.txt": []byte("x")},
+			entries: map[string]FileEntry{"file.txt": newFileEntry([]byte("x"))},
 		}
 
 		_, err := client.PushChange(context.Background(), "parent", change)
@@ -450,7 +455,7 @@ func TestPushChange(t *testing.T) {
 		change := Change{
 			hash:    "local",
 			message: "Test",
-			entries: map[string][]byte{"file.txt": []byte("x")},
+			entries: map[string]FileEntry{"file.txt": newFileEntry([]byte("x"))},
 		}
 
 		_, err := client.PushChange(context.Background(), "nonexistent", change)
@@ -483,7 +488,7 @@ func TestPushChange(t *testing.T) {
 		change := Change{
 			hash:    "local",
 			message: "Test",
-			entries: map[string][]byte{"file.txt": []byte("x")},
+			entries: map[string]FileEntry{"file.txt": newFileEntry([]byte("x"))},
 		}
 
 		_, err := client.PushChange(context.Background(), "parent", change)
@@ -517,7 +522,7 @@ func TestPushChange(t *testing.T) {
 		change := Change{
 			hash:    "local",
 			message: "Test",
-			entries: map[string][]byte{"file.txt": []byte("x")},
+			entries: map[string]FileEntry{"file.txt": newFileEntry([]byte("x"))},
 		}
 
 		_, err := client.PushChange(context.Background(), "parent", change)
@@ -554,7 +559,7 @@ func TestPushChange(t *testing.T) {
 		change := Change{
 			hash:    "local",
 			message: "Test",
-			entries: map[string][]byte{"file.txt": []byte("x")},
+			entries: map[string]FileEntry{"file.txt": newFileEntry([]byte("x"))},
 		}
 
 		_, err := client.PushChange(context.Background(), "parent", change)
@@ -594,7 +599,7 @@ func TestPushChange(t *testing.T) {
 		change := Change{
 			hash:    "local",
 			message: "Test",
-			entries: map[string][]byte{"file.txt": []byte("x")},
+			entries: map[string]FileEntry{"file.txt": newFileEntry([]byte("x"))},
 		}
 
 		_, err := client.PushChange(context.Background(), "parent", change)
@@ -638,9 +643,9 @@ func TestPushChanges(t *testing.T) {
 
 		client := newTestClient(t, server)
 		changes := []Change{
-			{hash: "h1", message: "First", entries: map[string][]byte{"a.txt": []byte("a")}},
-			{hash: "h2", message: "Second", entries: map[string][]byte{"b.txt": []byte("b")}},
-			{hash: "h3", message: "Third", entries: map[string][]byte{"c.txt": []byte("c")}},
+			{hash: "h1", message: "First", entries: map[string]FileEntry{"a.txt": newFileEntry([]byte("a"))}},
+			{hash: "h2", message: "Second", entries: map[string]FileEntry{"b.txt": newFileEntry([]byte("b"))}},
+			{hash: "h3", message: "Third", entries: map[string]FileEntry{"c.txt": newFileEntry([]byte("c"))}},
 		}
 
 		count, sha, err := client.PushChanges(context.Background(), "initial", changes...)
@@ -692,9 +697,9 @@ func TestPushChanges(t *testing.T) {
 
 		client := newTestClient(t, server)
 		changes := []Change{
-			{hash: "h1", message: "First", entries: map[string][]byte{"a.txt": []byte("a")}},
-			{hash: "h2", message: "Second", entries: map[string][]byte{"b.txt": []byte("b")}},
-			{hash: "h3", message: "Third", entries: map[string][]byte{"c.txt": []byte("c")}},
+			{hash: "h1", message: "First", entries: map[string]FileEntry{"a.txt": newFileEntry([]byte("a"))}},
+			{hash: "h2", message: "Second", entries: map[string]FileEntry{"b.txt": newFileEntry([]byte("b"))}},
+			{hash: "h3", message: "Third", entries: map[string]FileEntry{"c.txt": newFileEntry([]byte("c"))}},
 		}
 
 		count, _, err := client.PushChanges(context.Background(), "initial", changes...)

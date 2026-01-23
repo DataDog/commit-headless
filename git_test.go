@@ -203,13 +203,35 @@ func TestStagedChanges(t *testing.T) {
 		if len(changes) != 1 {
 			t.Fatalf("expected 1 change, got %d", len(changes))
 		}
-		if string(changes["new.txt"]) != "new content" {
-			t.Errorf("unexpected content: %q", changes["new.txt"])
+		if string(changes["new.txt"].Content) != "new content" {
+			t.Errorf("unexpected content: %q", changes["new.txt"].Content)
+		}
+		if changes["new.txt"].Mode != "100644" {
+			t.Errorf("unexpected mode: %q", changes["new.txt"].Mode)
 		}
 
 		// Cleanup
 		tr.git("reset", "HEAD", "new.txt")
 		os.Remove(tr.path("new.txt"))
+	})
+
+	t.Run("staged executable", func(t *testing.T) {
+		requireNoError(t, os.WriteFile(tr.path("script.sh"), []byte("#!/bin/bash\necho hello"), 0o755))
+		tr.git("add", "script.sh")
+
+		changes, err := r.StagedChanges()
+		requireNoError(t, err)
+
+		if len(changes) != 1 {
+			t.Fatalf("expected 1 change, got %d", len(changes))
+		}
+		if changes["script.sh"].Mode != "100755" {
+			t.Errorf("expected executable mode 100755, got %q", changes["script.sh"].Mode)
+		}
+
+		// Cleanup
+		tr.git("reset", "HEAD", "script.sh")
+		os.Remove(tr.path("script.sh"))
 	})
 
 	t.Run("staged modification", func(t *testing.T) {
@@ -222,8 +244,8 @@ func TestStagedChanges(t *testing.T) {
 		if len(changes) != 1 {
 			t.Fatalf("expected 1 change, got %d", len(changes))
 		}
-		if string(changes["existing.txt"]) != "modified" {
-			t.Errorf("unexpected content: %q", changes["existing.txt"])
+		if string(changes["existing.txt"].Content) != "modified" {
+			t.Errorf("unexpected content: %q", changes["existing.txt"].Content)
 		}
 
 		// Cleanup - restore file to original state
@@ -239,8 +261,8 @@ func TestStagedChanges(t *testing.T) {
 		if len(changes) != 1 {
 			t.Fatalf("expected 1 change, got %d", len(changes))
 		}
-		if changes["existing.txt"] != nil {
-			t.Errorf("expected nil for deletion, got %q", changes["existing.txt"])
+		if changes["existing.txt"].Content != nil {
+			t.Errorf("expected nil for deletion, got %q", changes["existing.txt"].Content)
 		}
 
 		// Cleanup - restore file
@@ -287,13 +309,13 @@ func TestChangedFiles(t *testing.T) {
 		t.Fatalf("expected changed files to be 'to-delete' and 'to-empty', got %q", keys)
 	}
 
-	if change.entries["to-empty"] == nil {
-		t.Log("expected to-empty to be empty, not nil")
+	if change.entries["to-empty"].Content == nil {
+		t.Log("expected to-empty to have empty content, not nil")
 		t.Fail()
 	}
 
-	if change.entries["to-delete"] != nil {
-		t.Logf("expected to-delete to be nil, got %q", change.entries["to-delete"])
+	if change.entries["to-delete"].Content != nil {
+		t.Logf("expected to-delete to have nil content, got %q", change.entries["to-delete"].Content)
 		t.Fail()
 	}
 }

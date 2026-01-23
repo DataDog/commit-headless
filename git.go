@@ -76,7 +76,7 @@ func (r *Repository) changed(commit string) (Change, error) {
 		hash:    commit,
 		message: message,
 		author:  author,
-		entries: map[string][]byte{},
+		entries: map[string]FileEntry{},
 	}
 
 	change.entries, err = r.changedFiles(commit)
@@ -141,9 +141,9 @@ func (r *Repository) catfile(commit string) ([]string, string, string, error) {
 	return parents, author, message, nil
 }
 
-// Returns the files changed in the given commit, along with their contents
-// Deleted files will have an empty value
-func (r *Repository) changedFiles(commit string) (map[string][]byte, error) {
+// Returns the files changed in the given commit, along with their contents and modes.
+// Deleted files will have nil content.
+func (r *Repository) changedFiles(commit string) (map[string]FileEntry, error) {
 	cmd := exec.Command("git", "diff-tree", "--no-commit-id", "--name-status", "-r", commit)
 	cmd.Dir = r.path
 	out, err := cmd.Output()
@@ -151,7 +151,7 @@ func (r *Repository) changedFiles(commit string) (map[string][]byte, error) {
 		return nil, err
 	}
 
-	changes := map[string][]byte{}
+	changes := map[string]FileEntry{}
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
 		ln := scanner.Text()
@@ -159,21 +159,21 @@ func (r *Repository) changedFiles(commit string) (map[string][]byte, error) {
 		status, value, _ := strings.Cut(ln, "\t")
 		switch {
 		case status == "A" || status == "M":
-			contents, err := r.fileContent(commit, value)
+			content, mode, err := r.fileContentAndMode(commit, value)
 			if err != nil {
 				return nil, fmt.Errorf("get content %s:%s: %w", commit, value, err)
 			}
-			changes[value] = contents
+			changes[value] = FileEntry{Content: content, Mode: mode}
 		case strings.HasPrefix(status, "R"): // Renames may have a similarity score after the R
 			from, to, _ := strings.Cut(value, "\t")
-			changes[from] = nil
-			contents, err := r.fileContent(commit, to)
+			changes[from] = FileEntry{Content: nil, Mode: ""}
+			content, mode, err := r.fileContentAndMode(commit, to)
 			if err != nil {
 				return nil, fmt.Errorf("get content %s:%s: %w", commit, to, err)
 			}
-			changes[to] = contents
+			changes[to] = FileEntry{Content: content, Mode: mode}
 		case status == "D":
-			changes[value] = nil
+			changes[value] = FileEntry{Content: nil, Mode: ""}
 		}
 	}
 
@@ -184,15 +184,32 @@ func (r *Repository) changedFiles(commit string) (map[string][]byte, error) {
 	return changes, nil
 }
 
-func (r *Repository) fileContent(commit, path string) ([]byte, error) {
-	cmd := exec.Command("git", "cat-file", "blob", fmt.Sprintf("%s:%s", commit, path))
+func (r *Repository) fileContentAndMode(commit, path string) ([]byte, string, error) {
+	// Get the file mode from ls-tree
+	cmd := exec.Command("git", "ls-tree", commit, "--", path)
 	cmd.Dir = r.path
-	return cmd.Output()
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, "", fmt.Errorf("ls-tree: %w", err)
+	}
+
+	// Output format: mode SP type SP hash TAB path
+	mode := strings.SplitN(string(out), " ", 2)[0]
+
+	// Get the file content
+	cmd = exec.Command("git", "cat-file", "blob", fmt.Sprintf("%s:%s", commit, path))
+	cmd.Dir = r.path
+	content, err := cmd.Output()
+	if err != nil {
+		return nil, "", fmt.Errorf("cat-file: %w", err)
+	}
+
+	return content, mode, nil
 }
 
-// StagedChanges returns the files staged for commit along with their contents.
+// StagedChanges returns the files staged for commit along with their contents and modes.
 // Deleted files have nil content. Returns an empty map if there are no staged changes.
-func (r *Repository) StagedChanges() (map[string][]byte, error) {
+func (r *Repository) StagedChanges() (map[string]FileEntry, error) {
 	cmd := exec.Command("git", "diff", "--cached", "--name-status")
 	cmd.Dir = r.path
 	out, err := cmd.Output()
@@ -200,7 +217,7 @@ func (r *Repository) StagedChanges() (map[string][]byte, error) {
 		return nil, fmt.Errorf("get staged changes: %w", err)
 	}
 
-	changes := map[string][]byte{}
+	changes := map[string]FileEntry{}
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
 		ln := scanner.Text()
@@ -211,22 +228,21 @@ func (r *Repository) StagedChanges() (map[string][]byte, error) {
 		status, path, _ := strings.Cut(ln, "\t")
 		switch {
 		case status == "A" || status == "M":
-			// Read content from the index (staged version)
-			content, err := r.stagedContent(path)
+			content, mode, err := r.stagedContentAndMode(path)
 			if err != nil {
 				return nil, fmt.Errorf("get staged content %s: %w", path, err)
 			}
-			changes[path] = content
+			changes[path] = FileEntry{Content: content, Mode: mode}
 		case strings.HasPrefix(status, "R"): // Renames have the form "Rxxx\told\tnew"
 			from, to, _ := strings.Cut(path, "\t")
-			changes[from] = nil
-			content, err := r.stagedContent(to)
+			changes[from] = FileEntry{Content: nil, Mode: ""}
+			content, mode, err := r.stagedContentAndMode(to)
 			if err != nil {
 				return nil, fmt.Errorf("get staged content %s: %w", to, err)
 			}
-			changes[to] = content
+			changes[to] = FileEntry{Content: content, Mode: mode}
 		case status == "D":
-			changes[path] = nil
+			changes[path] = FileEntry{Content: nil, Mode: ""}
 		}
 	}
 
@@ -237,8 +253,24 @@ func (r *Repository) StagedChanges() (map[string][]byte, error) {
 	return changes, nil
 }
 
-func (r *Repository) stagedContent(path string) ([]byte, error) {
-	cmd := exec.Command("git", "cat-file", "blob", ":"+path)
+func (r *Repository) stagedContentAndMode(path string) ([]byte, string, error) {
+	// Get mode from ls-files -s (format: mode SP hash SP stage TAB path)
+	cmd := exec.Command("git", "ls-files", "-s", "--", path)
 	cmd.Dir = r.path
-	return cmd.Output()
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, "", fmt.Errorf("ls-files: %w", err)
+	}
+
+	mode := strings.SplitN(string(out), " ", 2)[0]
+
+	// Get content from the index
+	cmd = exec.Command("git", "cat-file", "blob", ":"+path)
+	cmd.Dir = r.path
+	content, err := cmd.Output()
+	if err != nil {
+		return nil, "", fmt.Errorf("cat-file: %w", err)
+	}
+
+	return content, mode, nil
 }
