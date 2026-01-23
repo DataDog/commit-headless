@@ -1,12 +1,16 @@
-name: Create signed commits out of local commits or a set of changed files.
+name: Create signed commits from local commits or staged changes.
 
 description: |
-  This GitHub Action was built specifically to simplify creating signed and verified commits on GitHub.
+  This GitHub Action simplifies creating signed and verified commits on GitHub.
 
   The created commits will be signed, and committer and author attribution will be the owner of the
   token that was used to create the commit. This is part of the GitHub API and cannot be changed.
-  However, the original commit author and message will be retained as a "Co-authored-by" trailer and
-  the message body, respectively.
+
+  For the 'push' command, the original commit author and message will be retained as a
+  "Co-authored-by" trailer and the message body, respectively.
+
+  For the 'commit' command, use --author and --message to specify commit metadata. This command
+  reads staged changes (git add) and can be used to broadcast changes to multiple repositories.
 inputs:
   token:
     description: 'GitHub token'

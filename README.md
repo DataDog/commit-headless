@@ -3,20 +3,17 @@
 A binary tool and GitHub Action for creating signed commits from headless workflows
 
 For the Action, please see [the action branch][action-branch] and the associated `action/`
-release tags. For example usage, see [Examples](#examples).
+release tags.
 
 `commit-headless` is focused on turning local commits into signed commits on the remote. It does
-this using the GitHub API, more specifically the [createCommitOnBranch][mutation] mutation. When
-commits are created using the API (instead of via `git push`), the commits will be signed and
-verified by GitHub on behalf of the owner of the credentials used to access the API.
+this using the GitHub REST API to create commits. When commits are created using the API (instead
+of via `git push`), the commits will be signed and verified by GitHub on behalf of the owner of the
+credentials used to access the API.
 
+*NOTE:* One limitation of creating commits using the API is that it does not expose any mechanism
+to set or change file modes. This means that if you rely on `commit-headless` to push binary files
+(or executable scripts), the file in the resulting commit will not retain the executable bit.
 
-*NOTE:* One limitation of creating commits using the GraphQL API is that it does not expose any
-mechanism to set or change file modes. It merely takes the file contents, base64 encoded. This means
-that if you rely on `commit-headless` to push binary files (or executable scripts), the file in the
-resulting commit will not retain that executable bit.
-
-[mutation]: https://docs.github.com/en/graphql/reference/mutations#createcommitonbranch
 [action-branch]: https://github.com/DataDog/commit-headless/tree/action
 
 ## Usage
@@ -63,7 +60,7 @@ and supply a commit hash to use as a branch point via `--head-sha`. With this fl
 `commit-headless` will create the branch on GitHub from that commit hash if it doesn't already
 exist.
 
-Example: `commit-headless <command> [flags...] --head-sha=$(git rev-parse main HEAD) --create-branch ...`
+Example: `commit-headless <command> [flags...] --head-sha=$(git rev-parse HEAD) --create-branch ...`
 
 ### commit-headless push
 
