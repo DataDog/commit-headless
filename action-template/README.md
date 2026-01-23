@@ -1,67 +1,72 @@
 # commit-headless action
 
-NOTE: This branch contains only the action implementation of `commit-headless`. To view the source
-code, see the [main](https://github.com/DataDog/commit-headless/tree/main) branch.
+This action creates signed and verified commits on GitHub from a workflow.
 
-This action uses `commit-headless` to support creating signed and verified remote commits from a
-GitHub action workflow.
+For source code and CLI documentation, see the [main branch](https://github.com/DataDog/commit-headless/tree/main).
 
-For more details on how `commit-headless` works, check the main branch link above.
+## Commands
 
-## Usage (commit-headless push)
+- [push](#push) - Push local commits as signed commits
+- [commit](#commit) - Create a signed commit from staged changes
+- [replay](#replay) - Re-sign existing remote commits
 
-If your workflow creates multiple commits and you want to push all of them, you can use
-`commit-headless push`:
+## Inputs
 
-```
+| Input | Description | Required | Default |
+|-------|-------------|----------|---------|
+| `command` | Command to run: `push`, `commit`, or `replay` | Yes | |
+| `branch` | Target branch name | Yes | |
+| `token` | GitHub token | No | `${{ github.token }}` |
+| `target` | Target repository (owner/repo) | No | `${{ github.repository }}` |
+| `head-sha` | Expected HEAD SHA (safety check) or branch point | No | |
+| `create-branch` | Create the branch if it doesn't exist | No | `false` |
+| `dry-run` | Skip actual remote writes | No | `false` |
+| `message` | Commit message (for `commit` command) | No | |
+| `author` | Commit author (for `commit` command) | No | github-actions bot |
+| `since` | Base commit to replay from (for `replay` command) | No | |
+| `working-directory` | Directory to run in | No | |
+
+## Outputs
+
+| Output | Description |
+|--------|-------------|
+| `pushed_ref` | SHA of the last commit created |
+
+## push
+
+Push local commits to the remote as signed commits.
+
+```yaml
 - name: Create commits
-  id: create-commits
   run: |
-    git config --global user.name "A U Thor"
-    git config --global user.email "author@example.com"
+    git config user.name "A U Thor"
+    git config user.email "author@example.com"
 
     echo "new file from my bot" >> bot.txt
-    git add bot.txt && git commit -m"bot commit 1"
+    git add bot.txt && git commit -m "bot commit 1"
 
     echo "another commit" >> bot.txt
-    git add bot.txt && git commit -m"bot commit 2"
-
-    # List both commit hashes in reverse order, space separated
-    echo "commits=\"$(git log "${{ github.sha }}".. --format='%H' | tr '\n' ' ')\"" >> $GITHUB_OUTPUT
-
-    # If you just have a single commit, you can do something like:
-    #  echo "commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
-    # and then use it in the action via:
-    #  with:
-    #    ...
-    #    commits: ${{ steps.create-commits.outputs.commit }}
+    git add bot.txt && git commit -m "bot commit 2"
 
 - name: Push commits
   uses: DataDog/commit-headless@action/v%%VERSION%%
   with:
-    token: ${{ github.token }} # default
-    target: ${{ github.repository }} # default
     branch: ${{ github.ref_name }}
     command: push
-    commits: "${{ steps.create-commits.outputs.commits }}"
 ```
 
-If you primarily create commits on *new* branches, you'll want to use the `create-branch` option. This
-example creates a commit with the current time in a file, and then pushes it to a branch named
-`build-timestamp`, creating it from the current commit hash if the branch doesn't exist.
+### Creating a new branch
 
-```
+Use `create-branch` with `head-sha` to create the branch if it doesn't exist:
+
+```yaml
 - name: Create commits
-  id: create-commits
   run: |
-    git config --global user.name "A U Thor"
-    git config --global user.email "author@example.com"
+    git config user.name "A U Thor"
+    git config user.email "author@example.com"
 
-    echo "BUILD-TIMESTAMP-RFC3339: $(date --rfc-3339=s)" > last-build.txt
-    git add last-build.txt && git commit -m"update build timestamp"
-
-    # Store the created commit as a step output
-    echo "commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+    echo "BUILD-TIMESTAMP: $(date --rfc-3339=s)" > last-build.txt
+    git add last-build.txt && git commit -m "update build timestamp"
 
 - name: Push commits
   uses: DataDog/commit-headless@action/v%%VERSION%%
@@ -70,42 +75,74 @@ example creates a commit with the current time in a file, and then pushes it to 
     head-sha: ${{ github.sha }}
     create-branch: true
     command: push
-    commits: "${{ steps.create-commits.outputs.commit }}"
 ```
 
-## Usage (commit-headless commit)
+## commit
 
-Some workflows may just have a specific set of files that they change and just want to create a
-single commit out of them. For that, you can use `commit-headless commit`:
+Create a signed commit from staged changes. Unlike `push`, this doesn't require any relationship
+between local and remote history.
 
-```
-- name: Change files
-  id: change-files
+```yaml
+- name: Stage changes
   run: |
-    echo "updating contents of bot.txt" >> bot.txt
-
+    echo "updating bot.txt" >> bot.txt
     date --rfc-3339=s >> timestamp
+    git add bot.txt timestamp
 
-    files="bot.txt timestamp"
-
-    # remove an old file if it exists
-    # commit-headless commit will fail if you attempt to delete a file that doesn't exist on the
-    # remote (enforced via the GitHub API)
-    if [[ -f timestamp.old ]]; then
-        rm timestamp.old
-        files += " timestamp.old"
-    fi
-
-    # Record the set of files we want to commit
-    echo "files=\"${files}\"" >> $GITHUB_OUTPUT
+    # Deletions work too
+    git rm -f old-file.txt || true
 
 - name: Create commit
   uses: DataDog/commit-headless@action/v%%VERSION%%
   with:
     branch: ${{ github.ref_name }}
-    author: "A U Thor <author@example.com>" # defaults to the github-actions bot account
+    author: "A U Thor <author@example.com>"
     message: "a commit message"
     command: commit
-    files: "${{ steps.create-commits.outputs.files }}"
-    force: true # default false, needs to be true to allow deletion
 ```
+
+### Broadcasting to multiple repositories
+
+Apply the same staged changes to multiple repositories:
+
+```yaml
+- name: Stage shared configuration
+  run: git add config.yml security-policy.md
+
+- name: Update repo1
+  uses: DataDog/commit-headless@action/v%%VERSION%%
+  with:
+    target: org/repo1
+    branch: main
+    message: "Update security policy"
+    command: commit
+
+- name: Update repo2
+  uses: DataDog/commit-headless@action/v%%VERSION%%
+  with:
+    target: org/repo2
+    branch: main
+    message: "Update security policy"
+    command: commit
+```
+
+## replay
+
+Re-sign existing remote commits. Useful when an earlier step creates unsigned commits.
+
+```yaml
+- name: Some action that creates unsigned commits
+  uses: some-org/some-action@v1
+
+- name: Replay commits as signed
+  uses: DataDog/commit-headless@action/v%%VERSION%%
+  with:
+    branch: ${{ github.ref_name }}
+    since: ${{ github.sha }}
+    command: replay
+```
+
+The `since` input specifies the base commit (exclusive). All commits after this point are replayed
+as signed commits, and the branch is force-updated.
+
+**Warning:** This command force-pushes to the remote branch.

@@ -95,6 +95,255 @@ func TestCommitHashes(t *testing.T) {
 	}
 }
 
+func TestCommitsSince(t *testing.T) {
+	tr := testRepo(t)
+
+	// Create a few commits
+	requireNoError(t, os.WriteFile(tr.path("file1"), []byte("content1"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "first commit")
+	hash1 := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+	requireNoError(t, os.WriteFile(tr.path("file2"), []byte("content2"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "second commit")
+	hash2 := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+	requireNoError(t, os.WriteFile(tr.path("file3"), []byte("content3"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "third commit")
+	hash3 := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+	r := &Repository{path: tr.root}
+
+	t.Run("commits since first", func(t *testing.T) {
+		commits, err := r.CommitsSince(hash1)
+		requireNoError(t, err)
+		if len(commits) != 2 {
+			t.Fatalf("expected 2 commits, got %d: %v", len(commits), commits)
+		}
+		if commits[0] != hash2 || commits[1] != hash3 {
+			t.Errorf("expected [%s, %s], got %v", hash2, hash3, commits)
+		}
+	})
+
+	t.Run("commits since second", func(t *testing.T) {
+		commits, err := r.CommitsSince(hash2)
+		requireNoError(t, err)
+		if len(commits) != 1 {
+			t.Fatalf("expected 1 commit, got %d: %v", len(commits), commits)
+		}
+		if commits[0] != hash3 {
+			t.Errorf("expected [%s], got %v", hash3, commits)
+		}
+	})
+
+	t.Run("commits since HEAD (none)", func(t *testing.T) {
+		commits, err := r.CommitsSince(hash3)
+		requireNoError(t, err)
+		if len(commits) != 0 {
+			t.Errorf("expected no commits, got %v", commits)
+		}
+	})
+
+	t.Run("invalid base", func(t *testing.T) {
+		_, err := r.CommitsSince("nonexistent-ref-12345")
+		if err == nil {
+			t.Error("expected error for invalid reference")
+		}
+	})
+
+	t.Run("diverged history", func(t *testing.T) {
+		// Create a separate branch with different history
+		tr.git("checkout", "-b", "other-branch", hash1)
+		requireNoError(t, os.WriteFile(tr.path("other-file"), []byte("other"), 0o644))
+		tr.git("add", "-A")
+		tr.git("commit", "--message", "commit on other branch")
+		otherHash := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+		// Go back to main branch
+		tr.git("checkout", "-")
+
+		// otherHash is not an ancestor of HEAD (hash3)
+		_, err := r.CommitsSince(otherHash)
+		if err == nil {
+			t.Error("expected error for diverged history")
+		}
+		if !strings.Contains(err.Error(), "not an ancestor") {
+			t.Errorf("expected 'not an ancestor' error, got: %v", err)
+		}
+	})
+}
+
+func TestCommitsBetween(t *testing.T) {
+	tr := testRepo(t)
+
+	// Create a few commits
+	requireNoError(t, os.WriteFile(tr.path("file1"), []byte("content1"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "first commit")
+	hash1 := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+	requireNoError(t, os.WriteFile(tr.path("file2"), []byte("content2"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "second commit")
+	hash2 := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+	requireNoError(t, os.WriteFile(tr.path("file3"), []byte("content3"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "third commit")
+	hash3 := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+	r := &Repository{path: tr.root}
+
+	t.Run("commits between first and third", func(t *testing.T) {
+		commits, err := r.CommitsBetween(hash1, hash3)
+		requireNoError(t, err)
+		if len(commits) != 2 {
+			t.Fatalf("expected 2 commits, got %d: %v", len(commits), commits)
+		}
+		if commits[0] != hash2 || commits[1] != hash3 {
+			t.Errorf("expected [%s, %s], got %v", hash2, hash3, commits)
+		}
+	})
+
+	t.Run("commits between first and second", func(t *testing.T) {
+		commits, err := r.CommitsBetween(hash1, hash2)
+		requireNoError(t, err)
+		if len(commits) != 1 {
+			t.Fatalf("expected 1 commit, got %d: %v", len(commits), commits)
+		}
+		if commits[0] != hash2 {
+			t.Errorf("expected [%s], got %v", hash2, commits)
+		}
+	})
+
+	t.Run("commits between same commit (none)", func(t *testing.T) {
+		commits, err := r.CommitsBetween(hash3, hash3)
+		requireNoError(t, err)
+		if len(commits) != 0 {
+			t.Errorf("expected no commits, got %v", commits)
+		}
+	})
+
+	t.Run("diverged history", func(t *testing.T) {
+		// Create a separate branch with different history
+		tr.git("checkout", "-b", "other-branch", hash1)
+		requireNoError(t, os.WriteFile(tr.path("other-file"), []byte("other"), 0o644))
+		tr.git("add", "-A")
+		tr.git("commit", "--message", "commit on other branch")
+		otherHash := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+		// Go back to main branch
+		tr.git("checkout", "-")
+
+		// otherHash is not an ancestor of hash3
+		_, err := r.CommitsBetween(otherHash, hash3)
+		if err == nil {
+			t.Error("expected error for diverged history")
+		}
+		if !strings.Contains(err.Error(), "not an ancestor") {
+			t.Errorf("expected 'not an ancestor' error, got: %v", err)
+		}
+	})
+}
+
+func TestStagedChanges(t *testing.T) {
+	tr := testRepo(t)
+
+	// Create initial commit
+	requireNoError(t, os.WriteFile(tr.path("existing.txt"), []byte("original"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "initial")
+
+	r := &Repository{path: tr.root}
+
+	t.Run("no staged changes", func(t *testing.T) {
+		changes, err := r.StagedChanges()
+		requireNoError(t, err)
+		if len(changes) != 0 {
+			t.Errorf("expected empty changes, got %d", len(changes))
+		}
+	})
+
+	t.Run("staged addition", func(t *testing.T) {
+		requireNoError(t, os.WriteFile(tr.path("new.txt"), []byte("new content"), 0o644))
+		tr.git("add", "new.txt")
+
+		changes, err := r.StagedChanges()
+		requireNoError(t, err)
+
+		if len(changes) != 1 {
+			t.Fatalf("expected 1 change, got %d", len(changes))
+		}
+		if string(changes["new.txt"].Content) != "new content" {
+			t.Errorf("unexpected content: %q", changes["new.txt"].Content)
+		}
+		if changes["new.txt"].Mode != "100644" {
+			t.Errorf("unexpected mode: %q", changes["new.txt"].Mode)
+		}
+
+		// Cleanup
+		tr.git("reset", "HEAD", "new.txt")
+		os.Remove(tr.path("new.txt"))
+	})
+
+	t.Run("staged executable", func(t *testing.T) {
+		requireNoError(t, os.WriteFile(tr.path("script.sh"), []byte("#!/bin/bash\necho hello"), 0o755))
+		tr.git("add", "script.sh")
+
+		changes, err := r.StagedChanges()
+		requireNoError(t, err)
+
+		if len(changes) != 1 {
+			t.Fatalf("expected 1 change, got %d", len(changes))
+		}
+		if changes["script.sh"].Mode != "100755" {
+			t.Errorf("expected executable mode 100755, got %q", changes["script.sh"].Mode)
+		}
+
+		// Cleanup
+		tr.git("reset", "HEAD", "script.sh")
+		os.Remove(tr.path("script.sh"))
+	})
+
+	t.Run("staged modification", func(t *testing.T) {
+		requireNoError(t, os.WriteFile(tr.path("existing.txt"), []byte("modified"), 0o644))
+		tr.git("add", "existing.txt")
+
+		changes, err := r.StagedChanges()
+		requireNoError(t, err)
+
+		if len(changes) != 1 {
+			t.Fatalf("expected 1 change, got %d", len(changes))
+		}
+		if string(changes["existing.txt"].Content) != "modified" {
+			t.Errorf("unexpected content: %q", changes["existing.txt"].Content)
+		}
+
+		// Cleanup - restore file to original state
+		tr.git("checkout", "HEAD", "--", "existing.txt")
+	})
+
+	t.Run("staged deletion", func(t *testing.T) {
+		tr.git("rm", "-f", "existing.txt")
+
+		changes, err := r.StagedChanges()
+		requireNoError(t, err)
+
+		if len(changes) != 1 {
+			t.Fatalf("expected 1 change, got %d", len(changes))
+		}
+		if changes["existing.txt"].Content != nil {
+			t.Errorf("expected nil for deletion, got %q", changes["existing.txt"].Content)
+		}
+
+		// Cleanup - restore file
+		tr.git("reset", "HEAD", "existing.txt")
+		tr.git("checkout", "existing.txt")
+	})
+}
+
 func TestChangedFiles(t *testing.T) {
 	// First, prep the test repository
 	tr := testRepo(t)
@@ -133,13 +382,13 @@ func TestChangedFiles(t *testing.T) {
 		t.Fatalf("expected changed files to be 'to-delete' and 'to-empty', got %q", keys)
 	}
 
-	if change.entries["to-empty"] == nil {
-		t.Log("expected to-empty to be empty, not nil")
+	if change.entries["to-empty"].Content == nil {
+		t.Log("expected to-empty to have empty content, not nil")
 		t.Fail()
 	}
 
-	if change.entries["to-delete"] != nil {
-		t.Logf("expected to-delete to be nil, got %q", change.entries["to-delete"])
+	if change.entries["to-delete"].Content != nil {
+		t.Logf("expected to-delete to have nil content, got %q", change.entries["to-delete"].Content)
 		t.Fail()
 	}
 }

@@ -4,5 +4,8 @@ go 1.24.10
 
 require (
 	github.com/alecthomas/kong v1.11.0
+	github.com/google/go-github/v81 v81.0.0
 	golang.org/x/oauth2 v0.30.0
 )
+
+require github.com/google/go-querystring v1.1.0 // indirect

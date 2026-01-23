@@ -5,6 +5,12 @@ import (
 	"strings"
 )
 
+// FileEntry represents a file in a change with its content and mode.
+type FileEntry struct {
+	Content []byte // nil indicates deletion, empty slice indicates empty file
+	Mode    string // git file mode (e.g., "100644", "100755")
+}
+
 // Change represents a single change that will be pushed to the remote.
 type Change struct {
 	hash   string
@@ -15,9 +21,8 @@ type Change struct {
 	// trailers are lines to add to the end of the body stored as a list to maintain insertion order
 	trailers []string
 
-	// entries is a map of path -> content for files modified in the change
-	// empty or nil content indicates a deleted file
-	entries map[string][]byte
+	// entries is a map of path -> FileEntry for files modified in the change
+	entries map[string]FileEntry
 }
 
 // Splits a commit message on the first blank line

@@ -1,148 +1,145 @@
 # commit-headless
 
-A binary tool and GitHub Action for creating signed commits from headless workflows
+A binary tool and GitHub Action for creating signed commits from headless workflows.
 
-For the Action, please see [the action branch][action-branch] and the associated `action/`
-release tags. For example usage, see [Examples](#examples).
+`commit-headless` turns local commits into signed commits on the remote using the GitHub REST API.
+When commits are created using the API (instead of via `git push`), they are signed and verified by
+GitHub on behalf of the credentials used to access the API.
 
-`commit-headless` is focused on turning local commits into signed commits on the remote. It does
-this using the GitHub API, more specifically the [createCommitOnBranch][mutation] mutation. When
-commits are created using the API (instead of via `git push`), the commits will be signed and
-verified by GitHub on behalf of the owner of the credentials used to access the API.
+File modes (such as the executable bit) are preserved when pushing commits.
 
+For the GitHub Action, see [the action branch][action-branch] and the associated `action/` release
+tags.
 
-*NOTE:* One limitation of creating commits using the GraphQL API is that it does not expose any
-mechanism to set or change file modes. It merely takes the file contents, base64 encoded. This means
-that if you rely on `commit-headless` to push binary files (or executable scripts), the file in the
-resulting commit will not retain that executable bit.
-
-[mutation]: https://docs.github.com/en/graphql/reference/mutations#createcommitonbranch
 [action-branch]: https://github.com/DataDog/commit-headless/tree/action
 
-## Usage
+## Commands
 
-There are two ways to create signed headless commits with this tool: `push` and `commit`.
+- [push](#push) - Push local commits to the remote as signed commits
+- [commit](#commit) - Create a signed commit from staged changes
+- [replay](#replay) - Re-sign existing remote commits
 
-Both of these commands take a target owner/repository (eg, `--target/-T DataDog/commit-headless`)
-and remote branch name (eg, `--branch bot-branch`) as required flags and expect to find a GitHub
-token in one of the following environment variables:
+All commands require:
+- A target repository: `--target/-T owner/repo`
+- A branch name: `--branch branch-name`
+- A GitHub token in one of: `HEADLESS_TOKEN`, `GITHUB_TOKEN`, or `GH_TOKEN`
 
-- HEADLESS_TOKEN
-- GITHUB_TOKEN
-- GH_TOKEN
+On success, `commit-headless` prints only the SHA of the last commit created, allowing easy capture
+in scripts.
 
-In normal usage, `commit-headless` will print *only* the reference to the last commit created on the
-remote, allowing this to easily be captured in a script.
+## push
 
-More on the specifics for each command below. See also: `commit-headless <command> --help`
+The `push` command automatically determines which local commits need to be pushed by comparing
+local HEAD with the remote branch HEAD. It extracts the changed files and commit message from each
+local commit and creates corresponding signed commits on the remote.
 
-### Specifying the expected head commit
+The remote commits will have the original commit message, with a "Co-authored-by" trailer for the
+original commit author.
 
-When creating remote commits via API, `commit-headless` must specify the "expected head sha" of the
-remote branch. By default, `commit-headless` will query the GitHub API to get the *current* HEAD
-commit of the remote branch and use that as the "expected head sha". This introduces some risk,
-especially for active branches or long running jobs, as a new commit introduced after the job starts
-will not be considered when pushing the new commits. The commit itself will not be replaced, but the
-changes it introduces may be lost.
+Basic usage:
 
-For example, consider an auto-formatting job. It runs `gofmt` over the entire codebase. If the job
-starts on commit A and formats a file `main.go`, and while the job is running the branch gains
-commit B, which adds *new* changes to `main.go`, when the lint job finishes the formatted version of
-`main.go` from commit A will be pushed to the remote, and overwrite the changes to `main.go`
-introduced in commit B.
+    # Push local commits to an existing remote branch
+    commit-headless push -T owner/repo --branch feature
 
-You can avoid this by specifying `--head-sha`. This will skip auto discovery of the remote branch
-HEAD and instead require that the remote branch HEAD matches the value of `--head-sha`. If the
-remote branch HEAD does not match `--head-sha`, the push will fail (which is likely what you want).
+    # Push with a safety check that remote HEAD matches expected value
+    commit-headless push -T owner/repo --branch feature --head-sha abc123
+
+    # Create a new branch and push local commits to it
+    commit-headless push -T owner/repo --branch new-feature --head-sha abc123 --create-branch
+
+### Safety check with --head-sha
+
+By default, `commit-headless` queries the GitHub API to get the current HEAD of the remote branch.
+This introduces risk on active branches: if a new commit is pushed after your job starts, your
+push will overwrite those changes.
+
+Specifying `--head-sha` adds a safety check: the push fails if the remote HEAD doesn't match the
+expected value.
 
 ### Creating a new branch
 
-Note that, by default, both of these commands expect the remote branch to already exist. If your
-workflow primarily works on *new* branches, you should additionally add the `--create-branch` flag
-and supply a commit hash to use as a branch point via `--head-sha`. With this flag,
-`commit-headless` will create the branch on GitHub from that commit hash if it doesn't already
-exist.
+By default, the target branch must already exist. To create a new branch, use `--create-branch`
+with `--head-sha` specifying the branch point:
 
-Example: `commit-headless <command> [flags...] --head-sha=$(git rev-parse main HEAD) --create-branch ...`
+    commit-headless push -T owner/repo --branch new-feature --head-sha abc123 --create-branch
 
-### commit-headless push
+### Diverged history
 
-In addition to the required target and branch flags, the `push` command expects a list of commit
-hashes as arguments *or* a list of commit hashes *in reverse chronological order (newest first)*
-on standard input.
+The remote HEAD (or `--head-sha` when creating a branch) must be an ancestor of local HEAD. If the
+histories have diverged, the push fails to prevent creating broken history.
 
-It will iterate over the supplied commits, extract the set of changed files and commit message, then
-craft new *remote* commits corresponding to each local commit.
+## commit
 
-The remote commit will have the original commit message, with "Co-authored-by" trailer for the
-original commit author.
+The `commit` command creates a single signed commit on the remote from your currently staged
+changes, similar to `git commit`. Stage your changes with `git add`, then run this command.
 
-You can use `commit-headless push` via:
+Staged deletions (`git rm`) are also supported. The staged file paths must match the paths on the
+remote.
 
-    commit-headless push [flags...] HASH1 HASH2 HASH3 ...
+Basic usage:
 
-Or, using git log (note `--oneline`):
+    # Stage changes and commit to remote
+    git add README.md
+    commit-headless commit -T owner/repo --branch feature -m "Update docs"
 
-    git log --oneline main.. | commit-headless push [flags...]
+    # Stage a deletion and a new file
+    git rm old-file.txt
+    git add new-file.txt
+    commit-headless commit -T owner/repo --branch feature -m "Replace old with new"
 
-### commit-headless commit
+### Broadcasting to multiple repositories
 
-This command is more geared for creating single commits at a time. It takes a list of files to
-commit changes to, and those files will either be updated/added or deleted in a single commit.
+Unlike `push`, the `commit` command does not require any relationship between local and remote
+history. This makes it useful for applying the same changes to multiple repositories:
 
-Note that you cannot delete a file without also adding `--force` for safety reasons.
+    git add config.yml security-policy.md
+    commit-headless commit -T org/repo1 --branch main -m "Update security policy"
+    commit-headless commit -T org/repo2 --branch main -m "Update security policy"
+    commit-headless commit -T org/repo3 --branch main -m "Update security policy"
 
-Usage example:
+## replay
 
-    # Commit changes to these two files
-    commit-headless commit [flags...] -- README.md .gitlab-ci.yml
+The `replay` command re-signs existing remote commits. This is useful when you have unsigned
+commits on a branch (e.g., from a bot or action that doesn't support signed commits) and want to
+replace them with signed versions.
 
-    # Remove a file, add another one, and commit
-    rm file/i/do/not/want
-    echo "hello" > hi-there.txt
-    commit-headless commit [flags...] --force -- hi-there.txt file/i/do/not/want
+The command fetches the remote branch, extracts commits since the specified base, recreates them
+as signed commits, and force-updates the branch ref.
 
-    # Commit a change with a custom message
-    commit-headless commit [flags...] -m"ran a pipeline" -- output.txt
+Basic usage:
 
-## Try it!
+    # Replay all commits since abc123 as signed commits
+    commit-headless replay -T owner/repo --branch feature --since abc123
 
-You can easily try `commit-headless` locally. Create a commit with a different author (to
-demonstrate how commit-headless attributes changes to the original author), and run it with a GitHub
-token.
+    # With safety check that remote HEAD matches expected value
+    commit-headless replay -T owner/repo --branch feature --since abc123 --head-sha def456
 
-For example, create a commit locally and push it to a new branch using the current branch as the
-branch point:
+**Warning:** This command force-pushes to the remote branch. The `--since` commit must be an
+ancestor of the branch HEAD.
+
+## Try it
+
+Create a local commit and push it to a new branch:
 
 ```
 cd ~/Code/repo
 echo "bot commit here" >> README.md
 git add README.md
-git commit --author='A U Thor <author@example.com>' --message="test bot commit"
-# Assuming a github token in $GITHUB_TOKEN or $HEADLESS_TOKEN
+git commit --author='A U Thor <author@example.com>' -m "test bot commit"
+
 commit-headless push \
-    --target=owner/repo \
-    --branch=bot-branch \
-    --head-sha="$(git rev-parse HEAD^)" \ # use the previous commit as our branch point
-    --create-branch \
-    "$(git rev-parse HEAD)" # push the commit we just created
+    -T owner/repo \
+    --branch bot-branch \
+    --head-sha "$(git rev-parse HEAD^)" \
+    --create-branch
 ```
 
-## Action Releases
+The `--head-sha "$(git rev-parse HEAD^)"` tells commit-headless to create the branch from the
+parent of your new commit, so only your new commit gets pushed.
 
-On a merge to main, if there's not already a tagged release for the current version (in
-`version.go`), a new tag will be created on the action branch.
+Or push to an existing branch:
 
-The action branch contains prebuilt binaries of `commit-headless` to avoid having to use Docker
-based (composite) actions, or to avoid having to download the binary when the action runs.
+```
+commit-headless push -T owner/repo --branch existing-branch
+```
 
-Because the workflow uses the rendered action (and the built binary) to create the commit to the
-action branch we are fairly safe from releasing a broken version of the action.
-
-Assuming the previous step works, the workflow will then create a tag of the form `action/vVERSION`.
-
-For more on the action release, see the [workflow](.github/workflows/release.yml).
-
-## Internal Image Releases
-
-See the internal commit-headless-ci-config repository.

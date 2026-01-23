@@ -2,10 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
 	"strings"
 )
@@ -13,78 +10,91 @@ import (
 type CommitCmd struct {
 	remoteFlags
 
-	Author  string   `help:"Specify an author using the standard 'A U Thor <author@example.com>' format."`
-	Message []string `short:"m" help:"Specify a commit message. If used multiple times, values are concatenated as separate paragraphs."`
-	Force   bool     `help:"Force commiting empty files. Only useful if you know you're deleting a file."`
-	Files   []string `arg:"" help:"Files to commit."`
+	RepoPath string   `name:"repo-path" default:"." help:"Path to the repository. Defaults to the current directory."`
+	Author   string   `help:"Specify an author using the standard 'A U Thor <author@example.com>' format."`
+	Message  []string `short:"m" help:"Specify a commit message. If used multiple times, values are concatenated as separate paragraphs."`
 }
 
 func (c *CommitCmd) Help() string {
 	return `
-This command can be used to create a single commit on the remote by passing in the names of files.
+This command creates a single commit on the remote from the currently staged changes (git add).
 
-It is expected that the paths on disk match to paths on the remote. That is, if you supply
-"path/to/file.txt" then the contents of that file on disk will be applied to that same file on the
-remote when the commit is created.
+It works like 'git commit' - stage your changes first, then run this command to push them as a
+signed commit on the remote.
 
-You can also use this to delete files by passing a path to a file that does not exist on disk. Note
-that for safety reasons, commit-headless will require an extra flag --force before accepting
-deletions. It is an error to attempt to delete a file that does not exist.
+The staged file paths must match the paths on the remote. That is, if you stage "path/to/file.txt"
+then the contents of that file will be applied to that same path on the remote.
 
-If you pass a path to a file that does not exist on disk without the --force flag, commit-headless
-will print an error and exit.
+Staged deletions (git rm) are also supported.
 
-You can supply a commit message via --message/-m and an author via --author/-a. If unspecified,
+You can supply a commit message via --message/-m and an author via --author. If unspecified,
 default values will be used.
 
+Unlike 'push', this command does not require any relationship between local and remote history.
+This makes it useful for broadcasting the same file changes to multiple repositories:
+
+	git add config.yml security-policy.md
+	commit-headless commit -T org/repo1 --branch main -m "Update security policy"
+	commit-headless commit -T org/repo2 --branch main -m "Update security policy"
+	commit-headless commit -T org/repo3 --branch main -m "Update security policy"
+
+Each target repository can have completely unrelated history - you're applying file contents,
+not replaying commits.
+
 Examples:
-	# Commit changes to these two files
-	commit-headless commit [flags...] -- README.md .gitlab-ci.yml
+	# Stage changes and commit to remote
+	git add README.md .gitlab-ci.yml
+	commit-headless commit -T owner/repo --branch feature -m "Update docs"
 
-	# Remove a file, add another one, and commit
-	rm file/i/do/not/want
-	echo "hello" > hi-there.txt
-	commit-headless commit [flags...] --force -- hi-there.txt file/i/do/not/want
+	# Stage a deletion and a new file
+	git rm old-file.txt
+	git add new-file.txt
+	commit-headless commit -T owner/repo --branch feature -m "Replace old with new"
 
-	# Commit a change with a custom message
-	commit-headless commit [flags...] -m"ran a pipeline" -- output.txt
-	`
+	# Stage all changes and commit
+	git add -A
+	commit-headless commit -T owner/repo --branch feature -m "Update everything"
+`
 }
 
 func (c *CommitCmd) Run() error {
+	repo := &Repository{path: c.RepoPath}
+
+	entries, err := repo.StagedChanges()
+	if err != nil {
+		return err
+	}
+
+	if len(entries) == 0 {
+		logger.Notice("No staged changes to commit")
+		return nil
+	}
+
 	change := Change{
 		hash:    strings.Repeat("0", 40),
 		author:  c.Author,
 		message: strings.Join(c.Message, "\n\n"),
-		entries: map[string][]byte{},
+		entries: entries,
 	}
 
-	rootfs := os.DirFS(".")
-
-	for _, path := range c.Files {
-		path = strings.TrimPrefix(path, "./")
-
-		fp, err := rootfs.Open(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			if !c.Force {
-				return fmt.Errorf("file %q does not exist, but --force was not set", path)
-			}
-
-			change.entries[path] = nil
-			continue
-		} else if err != nil {
-			return fmt.Errorf("could not open file %q: %w", path, err)
-		}
-
-		contents, err := io.ReadAll(fp)
-		if err != nil {
-			return fmt.Errorf("read %q: %w", path, err)
-		}
-
-		change.entries[path] = contents
-	}
-
+	ctx := context.Background()
 	owner, repository := c.Target.Owner(), c.Target.Repository()
 
-	return pushChanges(context.Background(), owner, repository, c.Branch, c.HeadSha, c.CreateBranch, c.DryRun, change)
+	// Validate --head-sha against remote HEAD (same safety check as push command)
+	if c.HeadSha != "" && !c.CreateBranch {
+		token := getToken(os.Getenv)
+		if token == "" {
+			return fmt.Errorf("no GitHub token supplied")
+		}
+		client := NewClient(ctx, token, owner, repository, c.Branch)
+		remoteHead, err := client.GetHeadCommitHash(ctx)
+		if err != nil {
+			return fmt.Errorf("get remote HEAD: %w", err)
+		}
+		if c.HeadSha != remoteHead {
+			return fmt.Errorf("remote HEAD %s doesn't match expected --head-sha %s (the branch may have been updated)", remoteHead, c.HeadSha)
+		}
+	}
+
+	return pushChanges(ctx, owner, repository, c.Branch, c.HeadSha, c.CreateBranch, c.DryRun, change)
 }

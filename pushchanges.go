@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 )
+
+var hashRegex = regexp.MustCompile(`^[a-f0-9]{4,40}$`)
 
 // Takes a list of changes to push to the remote identified by target.
 // Prints the last commit pushed to standard output.
@@ -20,10 +23,10 @@ func pushChanges(ctx context.Context, owner, repository, branch, headSha string,
 		hashes = append(hashes, fmt.Sprintf("...and %d more.", len(changes)-10))
 	}
 
-	log("Owner: %s\n", owner)
-	log("Repository: %s\n", repository)
-	log("Branch: %s\n", branch)
-	log("Commits: %s\n", strings.Join(hashes, ", "))
+	endGroup := logger.Group(fmt.Sprintf("Pushing to %s/%s (branch: %s)", owner, repository, branch))
+	defer endGroup()
+
+	logger.Printf("Commits: %s\n", strings.Join(hashes, ", "))
 
 	if headSha != "" && (!hashRegex.MatchString(headSha) || len(headSha) != 40) {
 		return fmt.Errorf("invalid head-sha %q, must be a full 40 hex digit commit hash", headSha)
@@ -55,20 +58,7 @@ func pushChanges(ctx context.Context, owner, repository, branch, headSha string,
 		headSha = remoteSha
 	}
 
-	log("Remote head commit: %s\n", headSha)
-	for _, c := range changes {
-		log("Commit %s\n", c.hash)
-		log("  Headline: %s\n", c.Headline())
-		log("  Body: %s\n", c.Body())
-		log("  Changed files: %d\n", len(c.entries))
-		for p, content := range c.entries {
-			action := "MODIFY"
-			if content == nil {
-				action = "DELETE"
-			}
-			log("    - %s: %s\n", action, p)
-		}
-	}
+	logger.Printf("Remote head commit: %s\n", headSha)
 
 	pushed, newHead, err := client.PushChanges(ctx, headSha, changes...)
 	if err != nil {
@@ -77,12 +67,12 @@ func pushChanges(ctx context.Context, owner, repository, branch, headSha string,
 		return fmt.Errorf("pushed %d of %d changes", pushed, len(changes))
 	}
 
-	log("Pushed %d commits.\n", len(changes))
-	log("Branch URL: %s\n", client.browseCommitsURL())
+	logger.Noticef("Pushed %d commit(s): %s", len(changes), client.compareURL(headSha, newHead))
 
-	// The only thing that goes to standard output is the new head reference, allowing callers to
-	// capture stdout if they need the reference.
-	fmt.Println(newHead)
+	// Output the new head reference for capture by callers or GitHub Actions
+	if err := logger.Output("pushed_ref", newHead); err != nil {
+		return fmt.Errorf("write output: %w", err)
+	}
 
 	return nil
 }

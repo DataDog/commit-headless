@@ -1,5 +1,4 @@
 const childProcess = require('child_process')
-const crypto = require('crypto')
 const fs = require('fs')
 const os = require('os')
 const process = require('process')
@@ -30,13 +29,20 @@ function main() {
     console.error(`Error making binary executable: ${err.message}`);
   }
 
+  // Handle print-version: just run version command and exit
+  const printVersion = (process.env["INPUT_PRINT-VERSION"] || "false").toLowerCase();
+  if (printVersion === "true") {
+    const child = childProcess.spawnSync(cmd, ["version"], { stdio: 'inherit' });
+    process.exit(child.status || 0);
+  }
+
   const env = { ...process.env };
   env.HEADLESS_TOKEN = process.env.INPUT_TOKEN;
 
   const command = process.env.INPUT_COMMAND;
 
-  if (!["commit", "push"].includes(command)) {
-    console.error(`Unknown command '${command}'. Must be one of "commit" or "push".`);
+  if (!["commit", "push", "replay"].includes(command)) {
+    console.error(`Unknown command '${command}'. Must be one of "commit", "push", or "replay".`);
     process.exit(1);
   }
 
@@ -67,60 +73,36 @@ function main() {
 
   if(dryrun.toLowerCase() === "true") { args.push("--dry-run") }
 
-  if (command === "push") {
-    args.push(...process.env.INPUT_COMMITS.split(/\s+/));
-  } else {
+  if (command === "commit") {
     const author = process.env["INPUT_AUTHOR"] || "";
     const message = process.env["INPUT_MESSAGE"] || "";
     if(author !== "") { args.push("--author", author) }
     if(message !== "") { args.push("--message", message) }
-
-    const force = process.env["INPUT_FORCE"] || "false"
-    if(!["true", "false"].includes(force.toLowerCase())) {
-      console.error(`Invalid value for force (${force}). Must be one of true or false.`);
-      process.exit(1);
-    }
-
-    if(force.toLowerCase() === "true") { args.push("--force") }
-
-    args.push(...process.env.INPUT_FILES.split(/\s+/));
   }
 
+  if (command === "replay") {
+    const since = process.env["INPUT_SINCE"] || "";
+    if(since === "") {
+      console.error("replay command requires 'since' input");
+      process.exit(1);
+    }
+    args.push("--since", since);
+  }
+
+  // The Go binary handles GITHUB_OUTPUT directly and uses stdout for logs
+  // with workflow commands (grouping, notices, etc.)
   const child = childProcess.spawnSync(cmd, args, {
     env: env,
     cwd: process.env["INPUT_WORKING-DIRECTORY"] || process.cwd(),
-    // ignore stdin, capture stdout, stream stderr to the parent
-    stdio: ['ignore', 'pipe', 'inherit'],
+    stdio: 'inherit',
   })
 
-  const exitCode = child.status
-  if (typeof exitCode === 'number') {
-    if(exitCode === 0) {
-      const out = child.stdout.toString().trim();
-      console.log(`Pushed reference ${out}`);
-
-      const delim = `delim_${crypto.randomUUID()}`;
-      fs.appendFileSync(process.env.GITHUB_OUTPUT, `pushed_ref<<${delim}${os.EOL}${out}${os.EOL}${delim}`, { encoding: "utf8" });
-      process.exit(0);
-    }
-  } else {
-    console.error(`Child process exited uncleanly with signal ${child.signal || "unknown" }`);
-    if(child.error) {
-      console.error(`  error: ${child.error}`);
-    }
-    exitCode = 128;
+  if (child.error) {
+    console.error(`Failed to run commit-headless: ${child.error.message}`);
+    process.exit(1);
   }
 
-  if(child.stdout) {
-    // commit-headless should never print anything to stdout *except* the pushed reference, but just
-    // in case we'll print whatever happens here
-    console.log("Child process output:");
-    console.log(child.stdout.toString().trim());
-    console.log();
-  }
-
-  process.exit(exitCode);
-
+  process.exit(child.status || 0);
 }
 
 if (require.main === module) {

@@ -2,18 +2,13 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
 	"github.com/alecthomas/kong"
 )
 
-var logwriter io.Writer
-
-func log(f string, args ...any) {
-	fmt.Fprintf(logwriter, f, args...)
-}
+var logger *Logger
 
 type targetFlag string
 
@@ -52,11 +47,12 @@ type remoteFlags struct {
 type CLI struct {
 	Push    PushCmd    `cmd:"" help:"Push local commits to the remote."`
 	Commit  CommitCmd  `cmd:"" help:"Create a commit directly on the remote."`
+	Replay  ReplayCmd  `cmd:"" help:"Replay remote commits as signed commits."`
 	Version VersionCmd `cmd:"" help:"Print version information and exit."`
 }
 
 func main() {
-	logwriter = os.Stderr
+	logger = NewLogger(os.Stderr)
 
 	cli := CLI{}
 
