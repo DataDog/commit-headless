@@ -328,8 +328,8 @@ func TestPushChange(t *testing.T) {
 
 			case r.Method == http.MethodPost && r.URL.Path == "/repos/test-owner/test-repo/git/trees":
 				var req struct {
-					BaseTree string               `json:"base_tree"`
-					Tree     []*github.TreeEntry  `json:"tree"`
+					BaseTree string              `json:"base_tree"`
+					Tree     []*github.TreeEntry `json:"tree"`
 				}
 				json.NewDecoder(r.Body).Decode(&req)
 				treeEntries = req.Tree

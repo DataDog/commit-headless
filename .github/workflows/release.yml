@@ -74,10 +74,6 @@ jobs:
           --message="action: ${subject}" \
           --allow-empty # sometimes we have nothing to change, so this ensures we can still commit
 
-        REF=$(git rev-parse HEAD)
-        echo "sha=${REF}" >> $GITHUB_OUTPUT
-        echo "Created commit ${REF}"
-
     - name: push commits
       id: push-commits
       uses: ./ # use the action defined in the action branch
