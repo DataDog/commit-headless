@@ -265,6 +265,57 @@ jobs:
 
         echo "Replay test passed: commits were replayed with new hashes"
 
+    # Test: replay single commit (common case: one action-generated unsigned commit)
+    - name: "Test replay single: sync and record base"
+      id: replay-single-setup
+      run: |
+        git fetch origin ${{ env.TEST_BRANCH }}
+        git reset --hard origin/${{ env.TEST_BRANCH }}
+        echo "base_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+    - name: "Test replay single: create one commit with regular git push"
+      run: |
+        echo "single replay test" > single-replay.txt
+        git add single-replay.txt
+        git commit -m "test: single unsigned commit"
+        git push origin HEAD:${{ env.TEST_BRANCH }}
+
+    - name: "Test replay single: record pre-replay HEAD"
+      id: pre-replay-single
+      run: |
+        git fetch origin ${{ env.TEST_BRANCH }}
+        echo "head_sha=$(git rev-parse origin/${{ env.TEST_BRANCH }})" >> $GITHUB_OUTPUT
+
+    - name: "Test replay single: replay single commit as signed"
+      id: test-replay-single
+      uses: ./action-template
+      with:
+        branch: ${{ env.TEST_BRANCH }}
+        since: ${{ steps.replay-single-setup.outputs.base_sha }}
+        command: replay
+
+    - name: "Test replay single: verify"
+      run: |
+        git fetch origin ${{ env.TEST_BRANCH }}
+
+        new_head=$(git rev-parse origin/${{ env.TEST_BRANCH }})
+        old_head="${{ steps.pre-replay-single.outputs.head_sha }}"
+
+        if [ "$new_head" = "$old_head" ]; then
+          echo "ERROR: HEAD unchanged after replay"
+          exit 1
+        fi
+
+        log=$(git log origin/${{ env.TEST_BRANCH }} --oneline -1)
+        echo "Remote log: $log"
+
+        if ! echo "$log" | grep -q "test: single unsigned commit"; then
+          echo "ERROR: single commit not found"
+          exit 1
+        fi
+
+        echo "Single commit replay test passed"
+
     # Cleanup: delete test branch
     - name: Cleanup test branch
       if: always()
