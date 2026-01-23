@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 )
+
+var hashRegex = regexp.MustCompile(`^[a-f0-9]{4,40}$`)
 
 // Takes a list of changes to push to the remote identified by target.
 // Prints the last commit pushed to standard output.

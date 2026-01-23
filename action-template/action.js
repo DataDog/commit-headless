@@ -67,9 +67,7 @@ function main() {
 
   if(dryrun.toLowerCase() === "true") { args.push("--dry-run") }
 
-  if (command === "push") {
-    args.push(...process.env.INPUT_COMMITS.split(/\s+/));
-  } else {
+  if (command === "commit") {
     const author = process.env["INPUT_AUTHOR"] || "";
     const message = process.env["INPUT_MESSAGE"] || "";
     if(author !== "") { args.push("--author", author) }

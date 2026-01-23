@@ -12,7 +12,43 @@ type Repository struct {
 	path string
 }
 
-// Returns a Change for each supplied commit
+// CommitsSince returns the commits between base and HEAD, oldest first.
+// This is equivalent to `git rev-list --reverse base..HEAD`.
+// Returns an error if base is not an ancestor of HEAD.
+func (r *Repository) CommitsSince(base string) ([]string, error) {
+	// First verify that base is an ancestor of HEAD
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", base, "HEAD")
+	cmd.Dir = r.path
+	if err := cmd.Run(); err != nil {
+		if _, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("remote HEAD %s is not an ancestor of local HEAD (histories have diverged)", base)
+		}
+		return nil, fmt.Errorf("check ancestry: %w", err)
+	}
+
+	cmd = exec.Command("git", "rev-list", "--reverse", base+"..HEAD")
+	cmd.Dir = r.path
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("list commits: %s", strings.TrimSpace(string(ee.Stderr)))
+		}
+		return nil, fmt.Errorf("list commits: %w", err)
+	}
+
+	var commits []string
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		commits = append(commits, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return commits, nil
+}
+
+// Returns a Change for each supplied commit hash
 func (r *Repository) Changes(commits ...string) ([]Change, error) {
 	changes := make([]Change, len(commits))
 	for i, h := range commits {
@@ -25,16 +61,8 @@ func (r *Repository) Changes(commits ...string) ([]Change, error) {
 	return changes, nil
 }
 
-// Returns a Change for the specific commit
+// Returns a Change for the specific commit hash
 func (r *Repository) changed(commit string) (Change, error) {
-	// First, make sure the commit looks like a commit hash
-	// While technically all of our calls would work with references such as HEAD,
-	// refs/heads/branch, refs/tags/etc we're going to require callers provide things that look like
-	// commits.
-	if !hashRegex.MatchString(commit) {
-		return Change{}, fmt.Errorf("commit %q does not look like a commit, should be at least 4 hexadecimal digits.", commit)
-	}
-
 	parents, author, message, err := r.catfile(commit)
 	if err != nil {
 		return Change{}, err

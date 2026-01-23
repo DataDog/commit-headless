@@ -32,8 +32,6 @@ inputs:
   dry-run:
     description: 'Stop processing just before actually making changes to the remote. Note that the pushed_ref output will be a zeroed commit hash.'
     default: false
-  commits:
-    description: 'For push, the list of commit hashes to push, oldest first'
   files:
     description: 'For commit, the list of files to include in the commit'
   force:
