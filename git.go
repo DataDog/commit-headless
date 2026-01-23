@@ -118,8 +118,7 @@ func (r *Repository) catfile(commit string) ([]string, string, string, error) {
 			marker := strings.LastIndex(value, ">")
 			if marker == -1 {
 				// no author, or malformed, so make one up
-				log("Author is malformed, using a placeholder.\n")
-				log("  Malformed: %s\n", value)
+				logger.Warningf("Author is malformed (%s), using placeholder", value)
 				author = "Commit Headless <commit-headless-bot@datadoghq.com>"
 			} else {
 				author = value[:marker+1]

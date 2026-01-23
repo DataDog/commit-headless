@@ -74,7 +74,7 @@ func (c *PushCmd) Run() error {
 	}
 
 	if len(commits) == 0 {
-		log("No local commits to push (local HEAD matches remote HEAD %s)\n", baseCommit)
+		logger.Noticef("No local commits to push (local HEAD matches remote HEAD %s)", baseCommit)
 		return nil
 	}
 

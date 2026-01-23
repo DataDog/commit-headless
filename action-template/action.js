@@ -1,5 +1,4 @@
 const childProcess = require('child_process')
-const crypto = require('crypto')
 const fs = require('fs')
 const os = require('os')
 const process = require('process')
@@ -74,41 +73,20 @@ function main() {
     if(message !== "") { args.push("--message", message) }
   }
 
+  // The Go binary handles GITHUB_OUTPUT directly and uses stdout for logs
+  // with workflow commands (grouping, notices, etc.)
   const child = childProcess.spawnSync(cmd, args, {
     env: env,
     cwd: process.env["INPUT_WORKING-DIRECTORY"] || process.cwd(),
-    // ignore stdin, capture stdout, stream stderr to the parent
-    stdio: ['ignore', 'pipe', 'inherit'],
+    stdio: 'inherit',
   })
 
-  const exitCode = child.status
-  if (typeof exitCode === 'number') {
-    if(exitCode === 0) {
-      const out = child.stdout.toString().trim();
-      console.log(`Pushed reference ${out}`);
-
-      const delim = `delim_${crypto.randomUUID()}`;
-      fs.appendFileSync(process.env.GITHUB_OUTPUT, `pushed_ref<<${delim}${os.EOL}${out}${os.EOL}${delim}`, { encoding: "utf8" });
-      process.exit(0);
-    }
-  } else {
-    console.error(`Child process exited uncleanly with signal ${child.signal || "unknown" }`);
-    if(child.error) {
-      console.error(`  error: ${child.error}`);
-    }
-    exitCode = 128;
+  if (child.error) {
+    console.error(`Failed to run commit-headless: ${child.error.message}`);
+    process.exit(1);
   }
 
-  if(child.stdout) {
-    // commit-headless should never print anything to stdout *except* the pushed reference, but just
-    // in case we'll print whatever happens here
-    console.log("Child process output:");
-    console.log(child.stdout.toString().trim());
-    console.log();
-  }
-
-  process.exit(exitCode);
-
+  process.exit(child.status || 0);
 }
 
 if (require.main === module) {

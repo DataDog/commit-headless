@@ -39,7 +39,7 @@ inputs:
     description: 'For commit, the commit message'
 
 outputs:
-  pushed_sha:
+  pushed_ref:
     description: 'Commit hash of the last commit created'
 
 runs:
