@@ -190,3 +190,56 @@ func (r *Repository) fileContent(commit, path string) ([]byte, error) {
 	cmd.Dir = r.path
 	return cmd.Output()
 }
+
+// StagedChanges returns the files staged for commit along with their contents.
+// Deleted files have nil content. Returns an empty map if there are no staged changes.
+func (r *Repository) StagedChanges() (map[string][]byte, error) {
+	cmd := exec.Command("git", "diff", "--cached", "--name-status")
+	cmd.Dir = r.path
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("get staged changes: %w", err)
+	}
+
+	changes := map[string][]byte{}
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		ln := scanner.Text()
+		if ln == "" {
+			continue
+		}
+
+		status, path, _ := strings.Cut(ln, "\t")
+		switch {
+		case status == "A" || status == "M":
+			// Read content from the index (staged version)
+			content, err := r.stagedContent(path)
+			if err != nil {
+				return nil, fmt.Errorf("get staged content %s: %w", path, err)
+			}
+			changes[path] = content
+		case strings.HasPrefix(status, "R"): // Renames have the form "Rxxx\told\tnew"
+			from, to, _ := strings.Cut(path, "\t")
+			changes[from] = nil
+			content, err := r.stagedContent(to)
+			if err != nil {
+				return nil, fmt.Errorf("get staged content %s: %w", to, err)
+			}
+			changes[to] = content
+		case status == "D":
+			changes[path] = nil
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return changes, nil
+}
+
+func (r *Repository) stagedContent(path string) ([]byte, error) {
+	cmd := exec.Command("git", "cat-file", "blob", ":"+path)
+	cmd.Dir = r.path
+	return cmd.Output()
+}

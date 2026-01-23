@@ -32,11 +32,6 @@ inputs:
   dry-run:
     description: 'Stop processing just before actually making changes to the remote. Note that the pushed_ref output will be a zeroed commit hash.'
     default: false
-  files:
-    description: 'For commit, the list of files to include in the commit'
-  force:
-    description: 'For commit, set to true to support file deletion'
-    default: false
   author:
     description: 'For commit, the commit author'
     default: 'github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>'

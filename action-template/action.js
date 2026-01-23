@@ -72,16 +72,6 @@ function main() {
     const message = process.env["INPUT_MESSAGE"] || "";
     if(author !== "") { args.push("--author", author) }
     if(message !== "") { args.push("--message", message) }
-
-    const force = process.env["INPUT_FORCE"] || "false"
-    if(!["true", "false"].includes(force.toLowerCase())) {
-      console.error(`Invalid value for force (${force}). Must be one of true or false.`);
-      process.exit(1);
-    }
-
-    if(force.toLowerCase() === "true") { args.push("--force") }
-
-    args.push(...process.env.INPUT_FILES.split(/\s+/));
   }
 
   const child = childProcess.spawnSync(cmd, args, {

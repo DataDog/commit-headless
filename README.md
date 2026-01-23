@@ -91,23 +91,39 @@ accidentally create broken history when the local checkout is out of sync with t
 
 ### commit-headless commit
 
-This command is more geared for creating single commits at a time. It takes a list of files to
-commit changes to, and those files will either be updated/added or deleted in a single commit.
+The `commit` command creates a single commit on the remote from the currently staged changes,
+similar to how `git commit` works. Stage your changes first with `git add`, then run this command
+to push them as a signed commit on the remote.
 
-Note that you cannot delete a file without also adding `--force` for safety reasons.
+The staged file paths must match the paths on the remote. That is, if you stage "path/to/file.txt"
+then the contents of that file will be applied to that same path on the remote.
 
-Usage example:
+Staged deletions (`git rm`) are also supported.
 
-    # Commit changes to these two files
-    commit-headless commit [flags...] -- README.md .gitlab-ci.yml
+Unlike `push`, the `commit` command does not require any relationship between local and remote
+history. This makes it useful for broadcasting the same file changes to multiple repositories,
+even if they have completely unrelated histories:
 
-    # Remove a file, add another one, and commit
-    rm file/i/do/not/want
-    echo "hello" > hi-there.txt
-    commit-headless commit [flags...] --force -- hi-there.txt file/i/do/not/want
+    # Apply the same changes to multiple repositories
+    git add config.yml security-policy.md
+    commit-headless commit -T org/repo1 --branch main -m "Update security policy"
+    commit-headless commit -T org/repo2 --branch main -m "Update security policy"
+    commit-headless commit -T org/repo3 --branch main -m "Update security policy"
 
-    # Commit a change with a custom message
-    commit-headless commit [flags...] -m"ran a pipeline" -- output.txt
+Basic usage:
+
+    # Stage changes and commit to remote
+    git add README.md .gitlab-ci.yml
+    commit-headless commit -T owner/repo --branch feature -m "Update docs"
+
+    # Stage a deletion and a new file
+    git rm old-file.txt
+    git add new-file.txt
+    commit-headless commit -T owner/repo --branch feature -m "Replace old with new"
+
+    # Stage all changes and commit
+    git add -A
+    commit-headless commit -T owner/repo --branch feature -m "Update everything"
 
 ## Try it!
 
