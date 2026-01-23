@@ -129,9 +129,9 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 		logger.Printf("Body: %s\n", body)
 	}
 	logger.Printf("Changed files: %d\n", len(change.entries))
-	for path, content := range change.entries {
+	for path, fe := range change.entries {
 		action := "MODIFY"
-		if content == nil {
+		if fe.Content == nil {
 			action = "DELETE"
 		}
 		logger.Printf("  - %s: %s\n", action, path)
@@ -151,18 +151,24 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 
 	// Build tree entries
 	var entries []*github.TreeEntry
-	for path, content := range change.entries {
+	for path, fe := range change.entries {
+		// Use the file's mode, defaulting to 100644 for regular files
+		mode := fe.Mode
+		if mode == "" {
+			mode = "100644"
+		}
+
 		entry := &github.TreeEntry{
 			Path: github.Ptr(path),
-			Mode: github.Ptr("100644"),
+			Mode: github.Ptr(mode),
 			Type: github.Ptr("blob"),
 		}
-		if content == nil {
+		if fe.Content == nil {
 			// Deletion: SHA must be empty string for go-github to omit it
 		} else {
 			// Create blob for additions/modifications
 			blob, _, err := c.git.CreateBlob(ctx, c.owner, c.repo, github.Blob{
-				Content:  github.Ptr(string(content)),
+				Content:  github.Ptr(string(fe.Content)),
 				Encoding: github.Ptr("utf-8"),
 			})
 			if err != nil {

@@ -10,9 +10,7 @@ this using the GitHub REST API to create commits. When commits are created using
 of via `git push`), the commits will be signed and verified by GitHub on behalf of the owner of the
 credentials used to access the API.
 
-*NOTE:* One limitation of creating commits using the API is that it does not expose any mechanism
-to set or change file modes. This means that if you rely on `commit-headless` to push binary files
-(or executable scripts), the file in the resulting commit will not retain the executable bit.
+File modes (such as the executable bit) are preserved when pushing commits.
 
 [action-branch]: https://github.com/DataDog/commit-headless/tree/action
 
