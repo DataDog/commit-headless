@@ -66,7 +66,7 @@ func (c *CommitCmd) Run() error {
 	}
 
 	if len(entries) == 0 {
-		log("No staged changes to commit\n")
+		logger.Notice("No staged changes to commit")
 		return nil
 	}
 

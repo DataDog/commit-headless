@@ -14,7 +14,7 @@ import (
 )
 
 func init() {
-	logwriter = io.Discard
+	logger = NewLogger(io.Discard)
 }
 
 func TestBuildTreeEntries(t *testing.T) {
@@ -714,9 +714,9 @@ func TestURLHelpers(t *testing.T) {
 		branch: "feature-branch",
 	}
 
-	t.Run("browseCommitsURL", func(t *testing.T) {
-		url := client.browseCommitsURL()
-		expected := "https://github.com/myorg/myrepo/commits/feature-branch"
+	t.Run("compareURL", func(t *testing.T) {
+		url := client.compareURL("abc123", "def456")
+		expected := "https://github.com/myorg/myrepo/compare/abc123...def456"
 		if url != expected {
 			t.Errorf("expected %q, got %q", expected, url)
 		}

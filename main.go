@@ -2,18 +2,13 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
 	"github.com/alecthomas/kong"
 )
 
-var logwriter io.Writer
-
-func log(f string, args ...any) {
-	fmt.Fprintf(logwriter, f, args...)
-}
+var logger *Logger
 
 type targetFlag string
 
@@ -56,7 +51,7 @@ type CLI struct {
 }
 
 func main() {
-	logwriter = os.Stderr
+	logger = NewLogger(os.Stderr)
 
 	cli := CLI{}
 

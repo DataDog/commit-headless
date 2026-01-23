@@ -55,12 +55,12 @@ func NewClient(ctx context.Context, token, owner, repo, branch string) *Client {
 	}
 }
 
-func (c *Client) browseCommitsURL() string {
-	return fmt.Sprintf("https://github.com/%s/%s/commits/%s", c.owner, c.repo, c.branch)
-}
-
 func (c *Client) commitURL(hash string) string {
 	return fmt.Sprintf("https://github.com/%s/%s/commit/%s", c.owner, c.repo, hash)
+}
+
+func (c *Client) compareURL(base, head string) string {
+	return fmt.Sprintf("https://github.com/%s/%s/compare/%s...%s", c.owner, c.repo, base, head)
 }
 
 // GetHeadCommitHash returns the current head commit hash for the configured repository and branch
@@ -77,7 +77,7 @@ func (c *Client) GetHeadCommitHash(ctx context.Context) (string, error) {
 
 // CreateBranch attempts to create c.branch using headSha as the branch point
 func (c *Client) CreateBranch(ctx context.Context, headSha string) (string, error) {
-	log("Creating branch from commit %s\n", headSha)
+	logger.Printf("Creating branch from commit %s\n", headSha)
 
 	ref := github.CreateRef{
 		Ref: fmt.Sprintf("refs/heads/%s", c.branch),
@@ -114,8 +114,31 @@ func (c *Client) PushChanges(ctx context.Context, headCommit string, changes ...
 // PushChange pushes a single change using the REST API.
 // It returns the hash of the pushed commit or an error.
 func (c *Client) PushChange(ctx context.Context, headCommit string, change Change) (string, error) {
+	shortHash := change.hash
+	if len(shortHash) > 8 {
+		shortHash = shortHash[:8]
+	}
+	endGroup := logger.Group(fmt.Sprintf("Commit %s: %s", shortHash, change.Headline()))
+	defer endGroup()
+
+	// Log commit details
+	if change.author != "" {
+		logger.Printf("Author: %s\n", change.author)
+	}
+	if body := change.Body(); body != "" {
+		logger.Printf("Body: %s\n", body)
+	}
+	logger.Printf("Changed files: %d\n", len(change.entries))
+	for path, content := range change.entries {
+		action := "MODIFY"
+		if content == nil {
+			action = "DELETE"
+		}
+		logger.Printf("  - %s: %s\n", action, path)
+	}
+
 	if c.dryrun {
-		log("Dry run enabled, not writing commit.\n")
+		logger.Notice("Dry run enabled, not writing commit")
 		return strings.Repeat("0", len(change.hash)), nil
 	}
 
@@ -181,8 +204,7 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 	}
 
 	commitSha := commit.GetSHA()
-	log("Pushed commit %s -> %s\n", change.hash, commitSha)
-	log("  Commit URL: %s\n", c.commitURL(commitSha))
+	logger.Printf("Created: %s\n", c.commitURL(commitSha))
 
 	return commitSha, nil
 }
