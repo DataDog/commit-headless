@@ -29,6 +29,13 @@ function main() {
     console.error(`Error making binary executable: ${err.message}`);
   }
 
+  // Handle print-version: just run version command and exit
+  const printVersion = (process.env["INPUT_PRINT-VERSION"] || "false").toLowerCase();
+  if (printVersion === "true") {
+    const child = childProcess.spawnSync(cmd, ["version"], { stdio: 'inherit' });
+    process.exit(child.status || 0);
+  }
+
   const env = { ...process.env };
   env.HEADLESS_TOKEN = process.env.INPUT_TOKEN;
 
