@@ -58,29 +58,21 @@ example creates a commit with the current time in a file, and then pushes it to 
 
 ## Usage (commit-headless commit)
 
-Some workflows may just have a specific set of files that they change and just want to create a
-single commit out of them. For that, you can use `commit-headless commit`:
+The `commit` command creates a single commit from staged changes, similar to `git commit`. Stage
+your changes with `git add`, then run the action.
+
+Unlike `push`, the `commit` command does not require any relationship between local and remote
+history. This makes it useful for broadcasting the same file changes to multiple repositories.
 
 ```
-- name: Change files
-  id: change-files
+- name: Make and stage changes
   run: |
     echo "updating contents of bot.txt" >> bot.txt
-
     date --rfc-3339=s >> timestamp
+    git add bot.txt timestamp
 
-    files="bot.txt timestamp"
-
-    # remove an old file if it exists
-    # commit-headless commit will fail if you attempt to delete a file that doesn't exist on the
-    # remote (enforced via the GitHub API)
-    if [[ -f timestamp.old ]]; then
-        rm timestamp.old
-        files += " timestamp.old"
-    fi
-
-    # Record the set of files we want to commit
-    echo "files=\"${files}\"" >> $GITHUB_OUTPUT
+    # Deletions work too
+    git rm -f old-file.txt || true
 
 - name: Create commit
   uses: DataDog/commit-headless@action/v%%VERSION%%
@@ -89,6 +81,31 @@ single commit out of them. For that, you can use `commit-headless commit`:
     author: "A U Thor <author@example.com>" # defaults to the github-actions bot account
     message: "a commit message"
     command: commit
-    files: "${{ steps.change-files.outputs.files }}"
-    force: true # default false, needs to be true to allow deletion
+```
+
+### Broadcasting to multiple repositories
+
+The `commit` command can apply the same staged changes to multiple repositories, even if they have
+unrelated histories:
+
+```
+- name: Stage shared configuration
+  run: |
+    git add config.yml security-policy.md
+
+- name: Update repo1
+  uses: DataDog/commit-headless@action/v%%VERSION%%
+  with:
+    target: org/repo1
+    branch: main
+    message: "Update security policy"
+    command: commit
+
+- name: Update repo2
+  uses: DataDog/commit-headless@action/v%%VERSION%%
+  with:
+    target: org/repo2
+    branch: main
+    message: "Update security policy"
+    command: commit
 ```

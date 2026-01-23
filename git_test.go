@@ -175,6 +175,80 @@ func TestCommitsSince(t *testing.T) {
 	})
 }
 
+func TestStagedChanges(t *testing.T) {
+	tr := testRepo(t)
+
+	// Create initial commit
+	requireNoError(t, os.WriteFile(tr.path("existing.txt"), []byte("original"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "initial")
+
+	r := &Repository{path: tr.root}
+
+	t.Run("no staged changes", func(t *testing.T) {
+		changes, err := r.StagedChanges()
+		requireNoError(t, err)
+		if len(changes) != 0 {
+			t.Errorf("expected empty changes, got %d", len(changes))
+		}
+	})
+
+	t.Run("staged addition", func(t *testing.T) {
+		requireNoError(t, os.WriteFile(tr.path("new.txt"), []byte("new content"), 0o644))
+		tr.git("add", "new.txt")
+
+		changes, err := r.StagedChanges()
+		requireNoError(t, err)
+
+		if len(changes) != 1 {
+			t.Fatalf("expected 1 change, got %d", len(changes))
+		}
+		if string(changes["new.txt"]) != "new content" {
+			t.Errorf("unexpected content: %q", changes["new.txt"])
+		}
+
+		// Cleanup
+		tr.git("reset", "HEAD", "new.txt")
+		os.Remove(tr.path("new.txt"))
+	})
+
+	t.Run("staged modification", func(t *testing.T) {
+		requireNoError(t, os.WriteFile(tr.path("existing.txt"), []byte("modified"), 0o644))
+		tr.git("add", "existing.txt")
+
+		changes, err := r.StagedChanges()
+		requireNoError(t, err)
+
+		if len(changes) != 1 {
+			t.Fatalf("expected 1 change, got %d", len(changes))
+		}
+		if string(changes["existing.txt"]) != "modified" {
+			t.Errorf("unexpected content: %q", changes["existing.txt"])
+		}
+
+		// Cleanup - restore file to original state
+		tr.git("checkout", "HEAD", "--", "existing.txt")
+	})
+
+	t.Run("staged deletion", func(t *testing.T) {
+		tr.git("rm", "-f", "existing.txt")
+
+		changes, err := r.StagedChanges()
+		requireNoError(t, err)
+
+		if len(changes) != 1 {
+			t.Fatalf("expected 1 change, got %d", len(changes))
+		}
+		if changes["existing.txt"] != nil {
+			t.Errorf("expected nil for deletion, got %q", changes["existing.txt"])
+		}
+
+		// Cleanup - restore file
+		tr.git("reset", "HEAD", "existing.txt")
+		tr.git("checkout", "existing.txt")
+	})
+}
+
 func TestChangedFiles(t *testing.T) {
 	// First, prep the test repository
 	tr := testRepo(t)
