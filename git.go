@@ -12,6 +12,55 @@ type Repository struct {
 	path string
 }
 
+// Fetch fetches the specified branch from origin.
+func (r *Repository) Fetch(branch string) error {
+	cmd := exec.Command("git", "fetch", "origin", branch)
+	cmd.Dir = r.path
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("fetch: %s", strings.TrimSpace(string(ee.Stderr)))
+		}
+		return fmt.Errorf("fetch: %w", err)
+	}
+	return nil
+}
+
+// CommitsBetween returns the commits between base and head, oldest first.
+// This is equivalent to `git rev-list --reverse base..head`.
+// Returns an error if base is not an ancestor of head.
+func (r *Repository) CommitsBetween(base, head string) ([]string, error) {
+	// First verify that base is an ancestor of head
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", base, head)
+	cmd.Dir = r.path
+	if err := cmd.Run(); err != nil {
+		if _, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("%s is not an ancestor of %s (histories have diverged)", base, head)
+		}
+		return nil, fmt.Errorf("check ancestry: %w", err)
+	}
+
+	cmd = exec.Command("git", "rev-list", "--reverse", base+".."+head)
+	cmd.Dir = r.path
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("list commits: %s", strings.TrimSpace(string(ee.Stderr)))
+		}
+		return nil, fmt.Errorf("list commits: %w", err)
+	}
+
+	var commits []string
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		commits = append(commits, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return commits, nil
+}
+
 // CommitsSince returns the commits between base and HEAD, oldest first.
 // This is equivalent to `git rev-list --reverse base..HEAD`.
 // Returns an error if base is not an ancestor of HEAD.

@@ -37,6 +37,7 @@ type Client struct {
 	branch string
 
 	dryrun bool
+	force  bool
 }
 
 // NewClient returns a Client configured to make GitHub requests for branch owned by owner/repo on
@@ -203,7 +204,7 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 	// Update ref
 	_, _, err = c.git.UpdateRef(ctx, c.owner, c.repo, "refs/heads/"+c.branch, github.UpdateRef{
 		SHA:   commit.GetSHA(),
-		Force: github.Ptr(false),
+		Force: github.Ptr(c.force),
 	})
 	if err != nil {
 		return "", fmt.Errorf("update ref: %w", err)

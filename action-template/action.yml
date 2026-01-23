@@ -31,8 +31,10 @@ inputs:
     description: 'Create the remote branch, using head-sha as the branch point.'
     default: false
   command:
-    description: 'Command to run. One of "commit" or "push"'
+    description: 'Command to run. One of "commit", "push", or "replay"'
     required: true
+  since:
+    description: 'For replay, the base commit to replay from (exclusive)'
   dry-run:
     description: 'Stop processing just before actually making changes to the remote. Note that the pushed_ref output will be a zeroed commit hash.'
     default: false
