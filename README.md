@@ -67,23 +67,27 @@ Example: `commit-headless <command> [flags...] --head-sha=$(git rev-parse main H
 
 ### commit-headless push
 
-In addition to the required target and branch flags, the `push` command expects a list of commit
-hashes as arguments *or* a list of commit hashes *in reverse chronological order (newest first)*
-on standard input.
+The `push` command automatically determines which local commits need to be pushed by comparing
+local HEAD with the remote branch HEAD. It then iterates over those commits, extracts the changed
+files and commit message, and creates corresponding remote commits.
 
-It will iterate over the supplied commits, extract the set of changed files and commit message, then
-craft new *remote* commits corresponding to each local commit.
-
-The remote commit will have the original commit message, with "Co-authored-by" trailer for the
+The remote commits will have the original commit message, with a "Co-authored-by" trailer for the
 original commit author.
 
-You can use `commit-headless push` via:
+Basic usage:
 
-    commit-headless push [flags...] HASH1 HASH2 HASH3 ...
+    # Push local commits to an existing remote branch
+    commit-headless push -T owner/repo --branch feature
 
-Or, using git log (note `--oneline`):
+    # Push with a safety check that remote HEAD matches expected value
+    commit-headless push -T owner/repo --branch feature --head-sha abc123
 
-    git log --oneline main.. | commit-headless push [flags...]
+    # Create a new branch and push local commits to it
+    commit-headless push -T owner/repo --branch new-feature --head-sha abc123 --create-branch
+
+**Note:** The remote HEAD (or `--head-sha` when creating a branch) must be an ancestor of local
+HEAD. If the histories have diverged, the push will fail with an error. This ensures you don't
+accidentally create broken history when the local checkout is out of sync with the remote.
 
 ### commit-headless commit
 
@@ -111,7 +115,7 @@ You can easily try `commit-headless` locally. Create a commit with a different a
 demonstrate how commit-headless attributes changes to the original author), and run it with a GitHub
 token.
 
-For example, create a commit locally and push it to a new branch using the current branch as the
+For example, create a commit locally and push it to a new branch using the parent commit as the
 branch point:
 
 ```
@@ -123,9 +127,14 @@ git commit --author='A U Thor <author@example.com>' --message="test bot commit"
 commit-headless push \
     --target=owner/repo \
     --branch=bot-branch \
-    --head-sha="$(git rev-parse HEAD^)" \ # use the previous commit as our branch point
-    --create-branch \
-    "$(git rev-parse HEAD)" # push the commit we just created
+    --head-sha="$(git rev-parse HEAD^)" \
+    --create-branch
+```
+
+Or, to push to an existing branch:
+
+```
+commit-headless push --target=owner/repo --branch=existing-branch
 ```
 
 ## Action Releases

@@ -95,6 +95,86 @@ func TestCommitHashes(t *testing.T) {
 	}
 }
 
+func TestCommitsSince(t *testing.T) {
+	tr := testRepo(t)
+
+	// Create a few commits
+	requireNoError(t, os.WriteFile(tr.path("file1"), []byte("content1"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "first commit")
+	hash1 := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+	requireNoError(t, os.WriteFile(tr.path("file2"), []byte("content2"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "second commit")
+	hash2 := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+	requireNoError(t, os.WriteFile(tr.path("file3"), []byte("content3"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "third commit")
+	hash3 := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+	r := &Repository{path: tr.root}
+
+	t.Run("commits since first", func(t *testing.T) {
+		commits, err := r.CommitsSince(hash1)
+		requireNoError(t, err)
+		if len(commits) != 2 {
+			t.Fatalf("expected 2 commits, got %d: %v", len(commits), commits)
+		}
+		if commits[0] != hash2 || commits[1] != hash3 {
+			t.Errorf("expected [%s, %s], got %v", hash2, hash3, commits)
+		}
+	})
+
+	t.Run("commits since second", func(t *testing.T) {
+		commits, err := r.CommitsSince(hash2)
+		requireNoError(t, err)
+		if len(commits) != 1 {
+			t.Fatalf("expected 1 commit, got %d: %v", len(commits), commits)
+		}
+		if commits[0] != hash3 {
+			t.Errorf("expected [%s], got %v", hash3, commits)
+		}
+	})
+
+	t.Run("commits since HEAD (none)", func(t *testing.T) {
+		commits, err := r.CommitsSince(hash3)
+		requireNoError(t, err)
+		if len(commits) != 0 {
+			t.Errorf("expected no commits, got %v", commits)
+		}
+	})
+
+	t.Run("invalid base", func(t *testing.T) {
+		_, err := r.CommitsSince("nonexistent-ref-12345")
+		if err == nil {
+			t.Error("expected error for invalid reference")
+		}
+	})
+
+	t.Run("diverged history", func(t *testing.T) {
+		// Create a separate branch with different history
+		tr.git("checkout", "-b", "other-branch", hash1)
+		requireNoError(t, os.WriteFile(tr.path("other-file"), []byte("other"), 0o644))
+		tr.git("add", "-A")
+		tr.git("commit", "--message", "commit on other branch")
+		otherHash := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+		// Go back to main branch
+		tr.git("checkout", "-")
+
+		// otherHash is not an ancestor of HEAD (hash3)
+		_, err := r.CommitsSince(otherHash)
+		if err == nil {
+			t.Error("expected error for diverged history")
+		}
+		if !strings.Contains(err.Error(), "not an ancestor") {
+			t.Errorf("expected 'not an ancestor' error, got: %v", err)
+		}
+	})
+}
+
 func TestChangedFiles(t *testing.T) {
 	// First, prep the test repository
 	tr := testRepo(t)

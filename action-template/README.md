@@ -10,12 +10,11 @@ For more details on how `commit-headless` works, check the main branch link abov
 
 ## Usage (commit-headless push)
 
-If your workflow creates multiple commits and you want to push all of them, you can use
-`commit-headless push`:
+The `push` command automatically determines which local commits need to be pushed by comparing
+local HEAD with the remote branch HEAD.
 
 ```
 - name: Create commits
-  id: create-commits
   run: |
     git config --global user.name "A U Thor"
     git config --global user.email "author@example.com"
@@ -26,16 +25,6 @@ If your workflow creates multiple commits and you want to push all of them, you 
     echo "another commit" >> bot.txt
     git add bot.txt && git commit -m"bot commit 2"
 
-    # List both commit hashes in reverse order, space separated
-    echo "commits=\"$(git log "${{ github.sha }}".. --format='%H' | tr '\n' ' ')\"" >> $GITHUB_OUTPUT
-
-    # If you just have a single commit, you can do something like:
-    #  echo "commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
-    # and then use it in the action via:
-    #  with:
-    #    ...
-    #    commits: ${{ steps.create-commits.outputs.commit }}
-
 - name: Push commits
   uses: DataDog/commit-headless@action/v%%VERSION%%
   with:
@@ -43,7 +32,6 @@ If your workflow creates multiple commits and you want to push all of them, you 
     target: ${{ github.repository }} # default
     branch: ${{ github.ref_name }}
     command: push
-    commits: "${{ steps.create-commits.outputs.commits }}"
 ```
 
 If you primarily create commits on *new* branches, you'll want to use the `create-branch` option. This
@@ -52,16 +40,12 @@ example creates a commit with the current time in a file, and then pushes it to 
 
 ```
 - name: Create commits
-  id: create-commits
   run: |
     git config --global user.name "A U Thor"
     git config --global user.email "author@example.com"
 
     echo "BUILD-TIMESTAMP-RFC3339: $(date --rfc-3339=s)" > last-build.txt
     git add last-build.txt && git commit -m"update build timestamp"
-
-    # Store the created commit as a step output
-    echo "commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
 - name: Push commits
   uses: DataDog/commit-headless@action/v%%VERSION%%
@@ -70,7 +54,6 @@ example creates a commit with the current time in a file, and then pushes it to 
     head-sha: ${{ github.sha }}
     create-branch: true
     command: push
-    commits: "${{ steps.create-commits.outputs.commit }}"
 ```
 
 ## Usage (commit-headless commit)
@@ -106,6 +89,6 @@ single commit out of them. For that, you can use `commit-headless commit`:
     author: "A U Thor <author@example.com>" # defaults to the github-actions bot account
     message: "a commit message"
     command: commit
-    files: "${{ steps.create-commits.outputs.files }}"
+    files: "${{ steps.change-files.outputs.files }}"
     force: true # default false, needs to be true to allow deletion
 ```
