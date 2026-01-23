@@ -109,3 +109,27 @@ unrelated histories:
     message: "Update security policy"
     command: commit
 ```
+
+## Usage (commit-headless replay)
+
+The `replay` command replays existing remote commits as signed commits. This is useful when an
+earlier step in your workflow creates unsigned commits and you want to replace them with signed
+versions.
+
+```
+- name: Some action that creates unsigned commits
+  uses: some-org/some-action@v1
+  # This action creates commits but they're not signed
+
+- name: Replay commits as signed
+  uses: DataDog/commit-headless@action/v%%VERSION%%
+  with:
+    branch: ${{ github.ref_name }}
+    since: ${{ github.sha }}  # The commit before the unsigned commits
+    command: replay
+```
+
+The `since` input specifies the base commit (exclusive) - all commits after this point will be
+replayed as signed commits. The branch is then force-updated to point to the new signed commits.
+
+**Warning:** This command force-pushes to the remote branch.

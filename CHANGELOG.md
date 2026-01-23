@@ -19,6 +19,11 @@
 
 ### Features
 
+- **New `replay` command**: Replays existing remote commits as signed commits. Useful when a bot or
+  action creates unsigned commits that you want to replace with signed versions. The command
+  fetches the remote, extracts commits since a specified base, recreates them as signed, and
+  force-updates the branch.
+
 - **File mode preservation**: Executable bits and other file modes are now preserved when pushing
   commits. Previously all files were created with mode `100644`.
 

@@ -47,6 +47,7 @@ type remoteFlags struct {
 type CLI struct {
 	Push    PushCmd    `cmd:"" help:"Push local commits to the remote."`
 	Commit  CommitCmd  `cmd:"" help:"Create a commit directly on the remote."`
+	Replay  ReplayCmd  `cmd:"" help:"Replay remote commits as signed commits."`
 	Version VersionCmd `cmd:"" help:"Print version information and exit."`
 }
 

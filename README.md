@@ -16,7 +16,7 @@ File modes (such as the executable bit) are preserved when pushing commits.
 
 ## Usage
 
-There are two ways to create signed headless commits with this tool: `push` and `commit`.
+There are three commands for creating signed headless commits: `push`, `commit`, and `replay`.
 
 Both of these commands take a target owner/repository (eg, `--target/-T DataDog/commit-headless`)
 and remote branch name (eg, `--branch bot-branch`) as required flags and expect to find a GitHub
@@ -119,6 +119,26 @@ Basic usage:
     # Stage all changes and commit
     git add -A
     commit-headless commit -T owner/repo --branch feature -m "Update everything"
+
+### commit-headless replay
+
+The `replay` command replays existing remote commits as signed commits. This is useful when you
+have unsigned commits on a branch (e.g., from a bot or action that doesn't support signed commits)
+and want to replace them with signed versions.
+
+The command fetches the remote branch, extracts commits since the specified base, and recreates
+them as signed commits. The branch ref is then force-updated to point to the new signed commits.
+
+Basic usage:
+
+    # Replay all commits since abc123 as signed commits
+    commit-headless replay -T owner/repo --branch feature --since abc123
+
+    # With safety check that remote HEAD matches expected value
+    commit-headless replay -T owner/repo --branch feature --since abc123 --head-sha def456
+
+**Warning:** This command force-pushes to the remote branch. The `--since` commit must be an
+ancestor of the branch HEAD.
 
 ## Try it!
 

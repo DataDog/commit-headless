@@ -41,8 +41,8 @@ function main() {
 
   const command = process.env.INPUT_COMMAND;
 
-  if (!["commit", "push"].includes(command)) {
-    console.error(`Unknown command '${command}'. Must be one of "commit" or "push".`);
+  if (!["commit", "push", "replay"].includes(command)) {
+    console.error(`Unknown command '${command}'. Must be one of "commit", "push", or "replay".`);
     process.exit(1);
   }
 
@@ -78,6 +78,15 @@ function main() {
     const message = process.env["INPUT_MESSAGE"] || "";
     if(author !== "") { args.push("--author", author) }
     if(message !== "") { args.push("--message", message) }
+  }
+
+  if (command === "replay") {
+    const since = process.env["INPUT_SINCE"] || "";
+    if(since === "") {
+      console.error("replay command requires 'since' input");
+      process.exit(1);
+    }
+    args.push("--since", since);
   }
 
   // The Go binary handles GITHUB_OUTPUT directly and uses stdout for logs

@@ -187,6 +187,84 @@ jobs:
         fi
         echo "Executable bit preserved successfully"
 
+    # Test: replay command (re-sign existing commits)
+    - name: "Test replay: sync and record base"
+      id: replay-setup
+      run: |
+        git fetch origin ${{ env.TEST_BRANCH }}
+        git reset --hard origin/${{ env.TEST_BRANCH }}
+
+        # Record the current HEAD as the base for replay
+        echo "base_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+    - name: "Test replay: create commits with regular git push"
+      run: |
+        # Create commits that will be "unsigned" (pushed via git, not API)
+        echo "replay test 1" > replay-test.txt
+        git add replay-test.txt
+        git commit -m "test: replay commit 1"
+
+        echo "replay test 2" >> replay-test.txt
+        git add replay-test.txt
+        git commit -m "test: replay commit 2"
+
+        # Push directly with git (these won't be signed)
+        git push origin HEAD:${{ env.TEST_BRANCH }}
+
+    - name: "Test replay: record pre-replay HEAD"
+      id: pre-replay
+      run: |
+        git fetch origin ${{ env.TEST_BRANCH }}
+        echo "head_sha=$(git rev-parse origin/${{ env.TEST_BRANCH }})" >> $GITHUB_OUTPUT
+
+    - name: "Test replay: replay commits as signed"
+      id: test-replay
+      uses: ./action-template
+      with:
+        branch: ${{ env.TEST_BRANCH }}
+        since: ${{ steps.replay-setup.outputs.base_sha }}
+        command: replay
+
+    - name: "Test replay: verify output"
+      run: |
+        if [ -z "${{ steps.test-replay.outputs.pushed_ref }}" ]; then
+          echo "ERROR: pushed_ref output is empty"
+          exit 1
+        fi
+        echo "Pushed ref: ${{ steps.test-replay.outputs.pushed_ref }}"
+
+    - name: "Test replay: verify commits were replayed"
+      run: |
+        git fetch origin ${{ env.TEST_BRANCH }}
+
+        # The HEAD should be different (new signed commits)
+        new_head=$(git rev-parse origin/${{ env.TEST_BRANCH }})
+        old_head="${{ steps.pre-replay.outputs.head_sha }}"
+
+        echo "Old HEAD: $old_head"
+        echo "New HEAD: $new_head"
+
+        if [ "$new_head" = "$old_head" ]; then
+          echo "ERROR: HEAD unchanged after replay"
+          exit 1
+        fi
+
+        # But the commit messages should still be there
+        log=$(git log origin/${{ env.TEST_BRANCH }} --oneline -3)
+        echo "Remote log:"
+        echo "$log"
+
+        if ! echo "$log" | grep -q "test: replay commit 1"; then
+          echo "ERROR: replay commit 1 not found"
+          exit 1
+        fi
+        if ! echo "$log" | grep -q "test: replay commit 2"; then
+          echo "ERROR: replay commit 2 not found"
+          exit 1
+        fi
+
+        echo "Replay test passed: commits were replayed with new hashes"
+
     # Cleanup: delete test branch
     - name: Cleanup test branch
       if: always()
