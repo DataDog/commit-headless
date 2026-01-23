@@ -153,6 +153,12 @@ jobs:
         command: commit
 
     # Test: file mode preservation
+    # Sync local with remote after commit command created new remote commits
+    - name: "Test modes: sync local with remote"
+      run: |
+        git fetch origin ${{ env.TEST_BRANCH }}
+        git reset --hard origin/${{ env.TEST_BRANCH }}
+
     - name: "Test modes: create executable"
       run: |
         echo '#!/bin/bash' > script.sh
