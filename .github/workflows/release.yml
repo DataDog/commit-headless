@@ -84,7 +84,6 @@ jobs:
       with:
         branch: action
         command: push
-        commits: ${{ steps.create-commit.outputs.sha }}
 
     - name: check release tag
       id: check-tag
