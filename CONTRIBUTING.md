@@ -25,4 +25,20 @@ to be testable.
 
 ## Running Tests
 
-Using go test: `go test -v .`
+Using go test: `go test -v ./...`
+
+## Action Releases
+
+On merge to main, if there's no tagged release for the current version (in `version.go`), a new
+tag is created on the action branch.
+
+The action branch contains prebuilt binaries to avoid Docker-based actions or runtime downloads.
+The release workflow uses the built binary to create the action branch commit, providing confidence
+that releases work correctly.
+
+Tags follow the form `action/vVERSION`. See the [release workflow](.github/workflows/release.yml)
+for details.
+
+## Internal Image Releases
+
+See the internal commit-headless-ci-config repository.
