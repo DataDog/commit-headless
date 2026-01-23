@@ -41,6 +41,9 @@ inputs:
     default: 'github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>'
   message:
     description: 'For commit, the commit message'
+  print-version:
+    # Undocumented: prints version and exits. Used by release workflow.
+    default: false
 
 outputs:
   pushed_ref:
