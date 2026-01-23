@@ -96,6 +96,13 @@ jobs:
         fi
 
     # Test: push with no changes (should succeed with exit 0)
+    # After API push, remote commits have different hashes than local commits,
+    # so we need to sync local with remote first.
+    - name: "Test push: sync local with remote"
+      run: |
+        git fetch origin ${{ env.TEST_BRANCH }}
+        git reset --hard origin/${{ env.TEST_BRANCH }}
+
     - name: "Test push: no changes succeeds"
       uses: ./action-template
       with:
