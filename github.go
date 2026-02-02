@@ -122,7 +122,20 @@ func (c *Client) CreateBranch(ctx context.Context, headSha string) (string, erro
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnprocessableEntity {
-		return "", fmt.Errorf("create branch: http 422 (does the branch point exist?)")
+		// Parse the error response to distinguish between different failure modes
+		var errResp struct {
+			Message string `json:"message"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err == nil {
+			if strings.Contains(errResp.Message, "Reference already exists") {
+				return "", fmt.Errorf("create branch: branch %q already exists", c.branch)
+			}
+			if strings.Contains(errResp.Message, "Object does not exist") {
+				return "", fmt.Errorf("create branch: commit %q does not exist", headSha)
+			}
+			return "", fmt.Errorf("create branch: %s", errResp.Message)
+		}
+		return "", fmt.Errorf("create branch: http 422")
 	}
 
 	if resp.StatusCode != http.StatusCreated {
@@ -160,14 +173,14 @@ func (c *Client) PushChanges(ctx context.Context, headCommit string, changes ...
 }
 
 // Splits a Change into added and deleted slices, taking into account existing files vs empty files
-func (c *Client) splitChange(change Change) (added, deleted []fileChange) {
+func (c *Client) splitChange(change Change) (added []fileAddition, deleted []fileDeletion) {
 	for path, content := range change.entries {
 		if content == nil {
-			deleted = append(deleted, fileChange{
+			deleted = append(deleted, fileDeletion{
 				Path: path,
 			})
 		} else {
-			added = append(added, fileChange{
+			added = append(added, fileAddition{
 				Path:     path,
 				Contents: content,
 			})
@@ -290,11 +303,19 @@ type commitInputMessage struct {
 }
 
 type commitInputChanges struct {
-	Additions []fileChange `json:"additions,omitempty"`
-	Deletions []fileChange `json:"deletions,omitempty"`
+	Additions []fileAddition `json:"additions,omitempty"`
+	Deletions []fileDeletion `json:"deletions,omitempty"`
 }
 
-type fileChange struct {
+// fileAddition represents a file being added or modified.
+// Contents is always included in the JSON output, even if empty.
+type fileAddition struct {
 	Path     string `json:"path"`
-	Contents []byte `json:"contents,omitempty"`
+	Contents []byte `json:"contents"`
+}
+
+// fileDeletion represents a file being deleted.
+// It only contains the path; contents must not be included.
+type fileDeletion struct {
+	Path string `json:"path"`
 }
