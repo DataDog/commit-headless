@@ -1,6 +1,6 @@
 module github.com/DataDog/commit-headless
 
-go 1.24.10
+go 1.25.7
 
 require (
 	github.com/alecthomas/kong v1.11.0
