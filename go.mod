@@ -4,5 +4,5 @@ go 1.24.10
 
 require (
 	github.com/alecthomas/kong v1.11.0
-	golang.org/x/oauth2 v0.30.0
+	golang.org/x/oauth2 v0.35.0
 )
