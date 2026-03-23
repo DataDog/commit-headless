@@ -65,6 +65,14 @@ function main() {
 
   if(createBranch.toLowerCase() === "true") { args.push("--create-branch") }
 
+  const force = process.env["INPUT_FORCE"] || "false"
+  if(!["true", "false"].includes(force.toLowerCase())) {
+    console.error(`Invalid value for force (${force}). Must be one of true or false.`);
+    process.exit(1);
+  }
+
+  if(force.toLowerCase() === "true") { args.push("--force") }
+
   const dryrun = process.env["INPUT_DRY-RUN"] || "false"
   if(!["true", "false"].includes(dryrun.toLowerCase())) {
     console.error(`Invalid value for dry-run (${dryrun}). Must be one of true or false.`);

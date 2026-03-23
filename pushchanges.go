@@ -2,18 +2,14 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
-	"regexp"
 	"strings"
 )
 
-var hashRegex = regexp.MustCompile(`^[a-f0-9]{4,40}$`)
-
-// Takes a list of changes to push to the remote identified by target.
-// Prints the last commit pushed to standard output.
-func pushChanges(ctx context.Context, owner, repository, branch, headSha string, createBranch, dryrun bool, changes ...Change) error {
+// pushChanges pushes a list of changes using the given client.
+// headSha is the resolved parent for the first commit.
+// If the client has CreateBranch behavior needed, the caller should have already handled that.
+func pushChanges(ctx context.Context, client *Client, headSha string, changes ...Change) error {
 	hashes := []string{}
 	for i := 0; i < len(changes) && i < 10; i++ {
 		hashes = append(hashes, changes[i].hash)
@@ -23,41 +19,10 @@ func pushChanges(ctx context.Context, owner, repository, branch, headSha string,
 		hashes = append(hashes, fmt.Sprintf("...and %d more.", len(changes)-10))
 	}
 
-	endGroup := logger.Group(fmt.Sprintf("Pushing to %s/%s (branch: %s)", owner, repository, branch))
+	endGroup := logger.Group(fmt.Sprintf("Pushing to %s/%s (branch: %s)", client.owner, client.repo, client.branch))
 	defer endGroup()
 
 	logger.Printf("Commits: %s\n", strings.Join(hashes, ", "))
-
-	if headSha != "" && (!hashRegex.MatchString(headSha) || len(headSha) != 40) {
-		return fmt.Errorf("invalid head-sha %q, must be a full 40 hex digit commit hash", headSha)
-	}
-
-	if createBranch && headSha == "" {
-		return errors.New("cannot use --create-branch without supplying --head-sha")
-	}
-
-	token := getToken(os.Getenv)
-	if token == "" {
-		return errors.New("no GitHub token supplied")
-	}
-
-	client := NewClient(ctx, token, owner, repository, branch)
-	client.dryrun = dryrun
-
-	if headSha == "" {
-		remoteSha, err := client.GetHeadCommitHash(context.Background())
-		if err != nil {
-			return err
-		}
-		headSha = remoteSha
-	} else if createBranch {
-		remoteSha, err := client.CreateBranch(ctx, headSha)
-		if err != nil {
-			return err
-		}
-		headSha = remoteSha
-	}
-
 	logger.Printf("Remote head commit: %s\n", headSha)
 
 	pushed, newHead, err := client.PushChanges(ctx, headSha, changes...)

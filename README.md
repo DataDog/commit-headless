@@ -63,10 +63,24 @@ with `--head-sha` specifying the branch point:
 
     commit-headless push -T owner/repo --branch new-feature --head-sha abc123 --create-branch
 
+### Force-pushing after rebase
+
+When a branch has been rebased, the local history diverges from the remote and a normal push will
+fail. Use `--force` with `--head-sha` to push the rebased commits:
+
+    # After rebasing onto updated main:
+    commit-headless push -T owner/repo --branch feature \
+        --head-sha "$(git rev-parse main)" --force
+
+The `--head-sha` value is used as the parent of the first pushed commit, bypassing the remote HEAD
+check. The branch ref is force-updated even though the push is not a fast-forward.
+
+`--force` requires `--head-sha` to be set.
+
 ### Diverged history
 
-The remote HEAD (or `--head-sha` when creating a branch) must be an ancestor of local HEAD. If the
-histories have diverged, the push fails to prevent creating broken history.
+The remote HEAD (or `--head-sha` if `--create-branch` or `--force` is set) must be an ancestor of
+local HEAD. If it isn't, the push fails to prevent creating broken history.
 
 ## commit
 

@@ -28,7 +28,10 @@ inputs:
   head-sha:
     description: 'Expected commit sha of the remote branch, or the commit sha to branch from.'
   create-branch:
-    description: 'Create the remote branch, using head-sha as the branch point.'
+    description: 'Create the remote branch. Requires head-sha as the branch point.'
+    default: false
+  force:
+    description: 'Force-update the branch ref, allowing non-fast-forward updates. Requires head-sha.'
     default: false
   command:
     description: 'Command to run. One of "commit", "push", or "replay"'

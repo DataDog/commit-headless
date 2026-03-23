@@ -8,7 +8,6 @@ import (
 
 type PushCmd struct {
 	remoteFlags
-	RepoPath string `name:"repo-path" default:"." help:"Path to the repository that contains the commits. Defaults to the current directory."`
 }
 
 func (c *PushCmd) Help() string {
@@ -37,13 +36,20 @@ Example usage:
 	# Push with a safety check that remote HEAD matches expected value
 	commit-headless push -T owner/repo --branch feature --head-sha abc123
 
-When --head-sha is provided without --create-branch, it acts as a safety check: the push will fail
-if the remote branch HEAD doesn't match the expected value. This prevents accidentally overwriting
-commits that were pushed after your workflow started.
+	# Force-push rebased commits onto an updated base
+	commit-headless push -T owner/repo --branch feature --head-sha $(git rev-parse main) --force
 
-The remote HEAD (or --head-sha when creating a branch) must be an ancestor of local HEAD. If the
-histories have diverged, the push will fail. This prevents creating broken history when the local
-checkout is out of sync with the remote.
+When --head-sha is provided without --create-branch or --force, it acts as a safety check: the push
+will fail if the remote branch HEAD doesn't match the expected value. This prevents accidentally
+overwriting commits that were pushed after your workflow started.
+
+When --force is used with --head-sha, the branch ref is updated even if the push is not a
+fast-forward. The --head-sha value is used as the parent of the first pushed commit, bypassing the
+remote HEAD check. This is useful for re-signing commits after a rebase.
+
+The remote HEAD (or --head-sha when creating a branch or using --force) must be an ancestor of local
+HEAD. If the histories have diverged (and --force is not set), the push will fail. This prevents
+creating broken history when the local checkout is out of sync with the remote.
 
 Note that the pushed commits will not share the same commit sha, and you should avoid operating on
 the local checkout after running this command.
@@ -59,15 +65,22 @@ pushed commits, you should hard reset the local checkout to the remote version a
 func (c *PushCmd) Run() error {
 	ctx := context.Background()
 	repo := &Repository{path: c.RepoPath}
-	owner, repository := c.Target.Owner(), c.Target.Repository()
 
-	// Determine the base commit (remote HEAD or --head-sha for new branches)
-	baseCommit, err := c.getBaseCommit(ctx, owner, repository)
+	token := getToken(os.Getenv)
+	if token == "" {
+		return fmt.Errorf("no GitHub token supplied")
+	}
+
+	client := NewClient(ctx, token, c.Target.Owner(), c.Target.Repository(), c.Branch)
+	client.dryrun = c.DryRun
+	client.force = c.Force
+
+	baseCommit, err := c.ResolveBaseCommit(ctx, client)
 	if err != nil {
 		return err
 	}
 
-	// Find local commits that aren't on the remote
+	// Find local commits that aren't on the remote (uses the logical base, before branch creation)
 	commits, err := repo.CommitsSince(baseCommit)
 	if err != nil {
 		return err
@@ -83,36 +96,13 @@ func (c *PushCmd) Run() error {
 		return fmt.Errorf("get changes: %w", err)
 	}
 
-	return pushChanges(ctx, owner, repository, c.Branch, c.HeadSha, c.CreateBranch, c.DryRun, changes...)
-}
-
-// getBaseCommit returns the commit to use as the base for determining what to push.
-// For new branches (--create-branch), this is --head-sha.
-// For existing branches, this is the remote HEAD (validated against --head-sha if provided).
-func (c *PushCmd) getBaseCommit(ctx context.Context, owner, repository string) (string, error) {
 	if c.CreateBranch {
-		if c.HeadSha == "" {
-			return "", fmt.Errorf("--create-branch requires --head-sha to specify the branch point")
+		remoteSha, err := client.CreateBranch(ctx, baseCommit)
+		if err != nil {
+			return err
 		}
-		return c.HeadSha, nil
+		baseCommit = remoteSha
 	}
 
-	// Get the remote branch HEAD
-	token := getToken(os.Getenv)
-	if token == "" {
-		return "", fmt.Errorf("no GitHub token supplied")
-	}
-
-	client := NewClient(ctx, token, owner, repository, c.Branch)
-	remoteHead, err := client.GetHeadCommitHash(ctx)
-	if err != nil {
-		return "", fmt.Errorf("get remote HEAD: %w", err)
-	}
-
-	// If --head-sha was provided, validate it matches the remote
-	if c.HeadSha != "" && c.HeadSha != remoteHead {
-		return "", fmt.Errorf("remote HEAD %s doesn't match expected --head-sha %s (the branch may have been updated)", remoteHead, c.HeadSha)
-	}
-
-	return remoteHead, nil
+	return pushChanges(ctx, client, baseCommit, changes...)
 }

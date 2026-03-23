@@ -10,9 +10,8 @@ import (
 type CommitCmd struct {
 	remoteFlags
 
-	RepoPath string   `name:"repo-path" default:"." help:"Path to the repository. Defaults to the current directory."`
-	Author   string   `help:"Specify an author using the standard 'A U Thor <author@example.com>' format."`
-	Message  []string `short:"m" help:"Specify a commit message. If used multiple times, values are concatenated as separate paragraphs."`
+	Author  string   `help:"Specify an author using the standard 'A U Thor <author@example.com>' format."`
+	Message []string `short:"m" help:"Specify a commit message. If used multiple times, values are concatenated as separate paragraphs."`
 }
 
 func (c *CommitCmd) Help() string {
@@ -78,23 +77,28 @@ func (c *CommitCmd) Run() error {
 	}
 
 	ctx := context.Background()
-	owner, repository := c.Target.Owner(), c.Target.Repository()
 
-	// Validate --head-sha against remote HEAD (same safety check as push command)
-	if c.HeadSha != "" && !c.CreateBranch {
-		token := getToken(os.Getenv)
-		if token == "" {
-			return fmt.Errorf("no GitHub token supplied")
-		}
-		client := NewClient(ctx, token, owner, repository, c.Branch)
-		remoteHead, err := client.GetHeadCommitHash(ctx)
-		if err != nil {
-			return fmt.Errorf("get remote HEAD: %w", err)
-		}
-		if c.HeadSha != remoteHead {
-			return fmt.Errorf("remote HEAD %s doesn't match expected --head-sha %s (the branch may have been updated)", remoteHead, c.HeadSha)
-		}
+	token := getToken(os.Getenv)
+	if token == "" {
+		return fmt.Errorf("no GitHub token supplied")
 	}
 
-	return pushChanges(ctx, owner, repository, c.Branch, c.HeadSha, c.CreateBranch, c.DryRun, change)
+	client := NewClient(ctx, token, c.Target.Owner(), c.Target.Repository(), c.Branch)
+	client.dryrun = c.DryRun
+	client.force = c.Force
+
+	baseCommit, err := c.ResolveBaseCommit(ctx, client)
+	if err != nil {
+		return err
+	}
+
+	if c.CreateBranch {
+		remoteSha, err := client.CreateBranch(ctx, baseCommit)
+		if err != nil {
+			return err
+		}
+		baseCommit = remoteSha
+	}
+
+	return pushChanges(ctx, client, baseCommit, change)
 }

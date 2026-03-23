@@ -19,7 +19,8 @@ For source code and CLI documentation, see the [main branch](https://github.com/
 | `token` | GitHub token | No | `${{ github.token }}` |
 | `target` | Target repository (owner/repo) | No | `${{ github.repository }}` |
 | `head-sha` | Expected HEAD SHA (safety check) or branch point | No | |
-| `create-branch` | Create the branch if it doesn't exist | No | `false` |
+| `create-branch` | Create the branch if it doesn't exist (requires `head-sha`) | No | `false` |
+| `force` | Force-update the branch ref (requires `head-sha`) | No | `false` |
 | `dry-run` | Skip actual remote writes | No | `false` |
 | `message` | Commit message (for `commit` command) | No | |
 | `author` | Commit author (for `commit` command) | No | github-actions bot |

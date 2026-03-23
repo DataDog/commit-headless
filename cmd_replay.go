@@ -8,13 +8,8 @@ import (
 )
 
 type ReplayCmd struct {
-	Target  targetFlag `name:"target" short:"T" required:"" help:"Target repository in owner/repo format."`
-	Branch  string     `required:"" help:"Name of the target branch on the remote."`
-	HeadSha string     `name:"head-sha" help:"Expected commit sha of the remote branch HEAD (safety check)."`
-	Since   string     `required:"" help:"Base commit to replay from (exclusive). Commits after this will be replayed."`
-	DryRun  bool       `name:"dry-run" help:"Perform everything except the final remote writes to GitHub."`
-
-	RepoPath string `name:"repo-path" default:"." help:"Path to the local repository. Defaults to the current directory."`
+	baseFlags
+	Since string `required:"" help:"Base commit to replay from (exclusive). Commits after this will be replayed."`
 }
 
 func (c *ReplayCmd) Help() string {
@@ -51,24 +46,19 @@ WARNING: This command force-pushes to the remote branch. Use with caution.
 func (c *ReplayCmd) Run() error {
 	ctx := context.Background()
 	repo := &Repository{path: c.RepoPath}
-	owner, repository := c.Target.Owner(), c.Target.Repository()
 
 	token := getToken(os.Getenv)
 	if token == "" {
 		return fmt.Errorf("no GitHub token supplied")
 	}
 
-	client := NewClient(ctx, token, owner, repository, c.Branch)
+	client := NewClient(ctx, token, c.Target.Owner(), c.Target.Repository(), c.Branch)
+	client.dryrun = c.DryRun
+	client.force = true
 
-	// Get the current remote HEAD
-	remoteHead, err := client.GetHeadCommitHash(ctx)
-	if err != nil {
-		return fmt.Errorf("get remote HEAD: %w", err)
-	}
-
-	// If --head-sha was provided, validate it matches the remote
-	if c.HeadSha != "" && c.HeadSha != remoteHead {
-		return fmt.Errorf("remote HEAD %s doesn't match expected --head-sha %s (the branch may have been updated)", remoteHead, c.HeadSha)
+	// Validate remote HEAD against --head-sha if provided
+	if _, err := c.ValidateRemoteHead(ctx, client); err != nil {
+		return err
 	}
 
 	// Fetch the remote branch
@@ -95,10 +85,6 @@ func (c *ReplayCmd) Run() error {
 	if err != nil {
 		return fmt.Errorf("get changes: %w", err)
 	}
-
-	// Use force mode since we're replaying existing commits
-	client.dryrun = c.DryRun
-	client.force = true
 
 	return replayChanges(ctx, client, c.Since, changes...)
 }

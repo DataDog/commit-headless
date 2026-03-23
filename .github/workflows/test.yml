@@ -49,7 +49,61 @@ jobs:
         git config user.name "github-actions[bot]"
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-    # Test: push command with multiple commits
+    # Create the test branch. All suites reset to github.sha before running.
+    - name: Create test branch
+      run: git push origin ${{ github.sha }}:refs/heads/${{ env.TEST_BRANCH }}
+
+    # ---- create-branch ----
+
+    - name: "Test create-branch: create local commits"
+      run: |
+        git reset --hard ${{ github.sha }}
+
+        echo "New branch content" > new-branch-file.txt
+        git add new-branch-file.txt
+        git commit -m "test: create-branch commit"
+
+    - name: "Test create-branch: push to new branch"
+      id: test-create-branch
+      uses: ./action-template
+      with:
+        branch: ${{ env.TEST_BRANCH }}-create
+        head-sha: ${{ github.sha }}
+        create-branch: true
+        command: push
+
+    - name: "Test create-branch: verify output"
+      run: |
+        if [ -z "${{ steps.test-create-branch.outputs.pushed_ref }}" ]; then
+          echo "ERROR: pushed_ref output is empty"
+          exit 1
+        fi
+        echo "Pushed ref: ${{ steps.test-create-branch.outputs.pushed_ref }}"
+
+    - name: "Test create-branch: verify commit on remote"
+      run: |
+        git fetch origin ${{ env.TEST_BRANCH }}-create
+
+        log=$(git log origin/${{ env.TEST_BRANCH }}-create --oneline -2)
+        echo "Remote log:"
+        echo "$log"
+
+        if ! echo "$log" | grep -q "test: create-branch commit"; then
+          echo "ERROR: commit not found on new branch"
+          exit 1
+        fi
+
+    - name: "Test create-branch: cleanup"
+      if: always()
+      run: git push origin --delete ${{ env.TEST_BRANCH }}-create || true
+
+    # ---- push ----
+
+    - name: "Test push: reset"
+      run: |
+        git push origin ${{ github.sha }}:refs/heads/${{ env.TEST_BRANCH }} --force
+        git reset --hard ${{ github.sha }}
+
     - name: "Test push: create local commits"
       run: |
         echo "First change" > test-file.txt
@@ -60,13 +114,11 @@ jobs:
         git add test-file.txt
         git commit -m "test: second commit"
 
-    - name: "Test push: push commits to new branch"
+    - name: "Test push: push commits"
       id: test-push
       uses: ./action-template
       with:
         branch: ${{ env.TEST_BRANCH }}
-        head-sha: ${{ github.sha }}
-        create-branch: true
         command: push
 
     - name: "Test push: verify output"
@@ -81,7 +133,6 @@ jobs:
       run: |
         git fetch origin ${{ env.TEST_BRANCH }}
 
-        # Check that both commits exist
         log=$(git log origin/${{ env.TEST_BRANCH }} --oneline -3)
         echo "Remote log:"
         echo "$log"
@@ -95,21 +146,162 @@ jobs:
           exit 1
         fi
 
-    # Test: push with no changes (should succeed with exit 0)
-    # After API push, remote commits have different hashes than local commits,
-    # so we need to sync local with remote first.
-    - name: "Test push: sync local with remote"
+    # ---- push (no changes) ----
+
+    - name: "Test push no-op: reset"
+      run: |
+        git push origin ${{ github.sha }}:refs/heads/${{ env.TEST_BRANCH }} --force
+        git reset --hard ${{ github.sha }}
+
+    - name: "Test push no-op: sync local with remote"
       run: |
         git fetch origin ${{ env.TEST_BRANCH }}
         git reset --hard origin/${{ env.TEST_BRANCH }}
 
-    - name: "Test push: no changes succeeds"
+    - name: "Test push no-op: no changes succeeds"
       uses: ./action-template
       with:
         branch: ${{ env.TEST_BRANCH }}
         command: push
 
-    # Test: commit command with staged changes
+    # ---- force ----
+
+    - name: "Test force: reset"
+      run: |
+        git push origin ${{ github.sha }}:refs/heads/${{ env.TEST_BRANCH }} --force
+        git reset --hard ${{ github.sha }}
+
+    - name: "Test force: create initial commits"
+      run: |
+        echo "Initial change" > test-file.txt
+        git add test-file.txt
+        git commit -m "test: initial commit"
+
+    - name: "Test force: push initial commits"
+      uses: ./action-template
+      with:
+        branch: ${{ env.TEST_BRANCH }}
+        command: push
+
+    - name: "Test force: record pre-force HEAD"
+      id: pre-force
+      run: |
+        git fetch origin ${{ env.TEST_BRANCH }}
+        echo "head_sha=$(git rev-parse origin/${{ env.TEST_BRANCH }})" >> $GITHUB_OUTPUT
+
+    - name: "Test force: simulate rebase"
+      run: |
+        git reset --hard ${{ github.sha }}
+
+        echo "Rebased change 1" > test-file.txt
+        git add test-file.txt
+        git commit -m "test: rebased commit 1"
+
+        echo "Rebased change 2" >> test-file.txt
+        git add test-file.txt
+        git commit -m "test: rebased commit 2"
+
+    - name: "Test force: force-push rebased commits"
+      id: test-force
+      uses: ./action-template
+      with:
+        branch: ${{ env.TEST_BRANCH }}
+        head-sha: ${{ github.sha }}
+        force: true
+        command: push
+
+    - name: "Test force: verify output"
+      run: |
+        if [ -z "${{ steps.test-force.outputs.pushed_ref }}" ]; then
+          echo "ERROR: pushed_ref output is empty"
+          exit 1
+        fi
+        echo "Pushed ref: ${{ steps.test-force.outputs.pushed_ref }}"
+
+    - name: "Test force: verify rebased commits on remote"
+      run: |
+        git fetch origin ${{ env.TEST_BRANCH }}
+
+        new_head=$(git rev-parse origin/${{ env.TEST_BRANCH }})
+        old_head="${{ steps.pre-force.outputs.head_sha }}"
+
+        echo "Old HEAD: $old_head"
+        echo "New HEAD: $new_head"
+
+        if [ "$new_head" = "$old_head" ]; then
+          echo "ERROR: HEAD unchanged after force push"
+          exit 1
+        fi
+
+        log=$(git log origin/${{ env.TEST_BRANCH }} --oneline -3)
+        echo "Remote log:"
+        echo "$log"
+
+        if ! echo "$log" | grep -q "test: rebased commit 1"; then
+          echo "ERROR: rebased commit 1 not found on remote"
+          exit 1
+        fi
+        if ! echo "$log" | grep -q "test: rebased commit 2"; then
+          echo "ERROR: rebased commit 2 not found on remote"
+          exit 1
+        fi
+
+        if echo "$log" | grep -q "test: initial commit"; then
+          echo "ERROR: old pre-rebase commit still present"
+          exit 1
+        fi
+
+    # ---- commit create-branch ----
+
+    - name: "Test commit create-branch: stage changes"
+      run: |
+        git reset --hard ${{ github.sha }}
+
+        echo "New branch via commit" > commit-branch-file.txt
+        git add commit-branch-file.txt
+
+    - name: "Test commit create-branch: commit to new branch"
+      id: test-commit-create-branch
+      uses: ./action-template
+      with:
+        branch: ${{ env.TEST_BRANCH }}-commit-create
+        head-sha: ${{ github.sha }}
+        create-branch: true
+        message: "test: commit create-branch"
+        command: commit
+
+    - name: "Test commit create-branch: verify output"
+      run: |
+        if [ -z "${{ steps.test-commit-create-branch.outputs.pushed_ref }}" ]; then
+          echo "ERROR: pushed_ref output is empty"
+          exit 1
+        fi
+        echo "Pushed ref: ${{ steps.test-commit-create-branch.outputs.pushed_ref }}"
+
+    - name: "Test commit create-branch: verify commit on remote"
+      run: |
+        git fetch origin ${{ env.TEST_BRANCH }}-commit-create
+
+        log=$(git log origin/${{ env.TEST_BRANCH }}-commit-create --oneline -2)
+        echo "Remote log:"
+        echo "$log"
+
+        if ! echo "$log" | grep -q "test: commit create-branch"; then
+          echo "ERROR: commit not found on new branch"
+          exit 1
+        fi
+
+    - name: "Test commit create-branch: cleanup"
+      if: always()
+      run: git push origin --delete ${{ env.TEST_BRANCH }}-commit-create || true
+
+    # ---- commit ----
+
+    - name: "Test commit: reset"
+      run: |
+        git push origin ${{ github.sha }}:refs/heads/${{ env.TEST_BRANCH }} --force
+        git reset --hard ${{ github.sha }}
+
     - name: "Test commit: stage changes"
       run: |
         echo "Committed via commit command" > commit-test.txt
@@ -144,7 +336,6 @@ jobs:
           exit 1
         fi
 
-    # Test: commit with no staged changes (should succeed with exit 0)
     - name: "Test commit: no staged changes succeeds"
       uses: ./action-template
       with:
@@ -152,12 +343,12 @@ jobs:
         message: "this should not appear"
         command: commit
 
-    # Test: file mode preservation
-    # Sync local with remote after commit command created new remote commits
-    - name: "Test modes: sync local with remote"
+    # ---- file modes ----
+
+    - name: "Test modes: reset"
       run: |
-        git fetch origin ${{ env.TEST_BRANCH }}
-        git reset --hard origin/${{ env.TEST_BRANCH }}
+        git push origin ${{ github.sha }}:refs/heads/${{ env.TEST_BRANCH }} --force
+        git reset --hard ${{ github.sha }}
 
     - name: "Test modes: create executable"
       run: |
@@ -177,7 +368,6 @@ jobs:
       run: |
         git fetch origin ${{ env.TEST_BRANCH }}
 
-        # Get the file mode from the remote
         mode=$(git ls-tree origin/${{ env.TEST_BRANCH }} -- script.sh | awk '{print $1}')
         echo "File mode on remote: $mode"
 
@@ -187,19 +377,15 @@ jobs:
         fi
         echo "Executable bit preserved successfully"
 
-    # Test: replay command (re-sign existing commits)
-    - name: "Test replay: sync and record base"
-      id: replay-setup
-      run: |
-        git fetch origin ${{ env.TEST_BRANCH }}
-        git reset --hard origin/${{ env.TEST_BRANCH }}
+    # ---- replay (multiple commits) ----
 
-        # Record the current HEAD as the base for replay
-        echo "base_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+    - name: "Test replay: reset"
+      run: |
+        git push origin ${{ github.sha }}:refs/heads/${{ env.TEST_BRANCH }} --force
+        git reset --hard ${{ github.sha }}
 
     - name: "Test replay: create commits with regular git push"
       run: |
-        # Create commits that will be "unsigned" (pushed via git, not API)
         echo "replay test 1" > replay-test.txt
         git add replay-test.txt
         git commit -m "test: replay commit 1"
@@ -208,7 +394,6 @@ jobs:
         git add replay-test.txt
         git commit -m "test: replay commit 2"
 
-        # Push directly with git (these won't be signed)
         git push origin HEAD:${{ env.TEST_BRANCH }}
 
     - name: "Test replay: record pre-replay HEAD"
@@ -222,7 +407,7 @@ jobs:
       uses: ./action-template
       with:
         branch: ${{ env.TEST_BRANCH }}
-        since: ${{ steps.replay-setup.outputs.base_sha }}
+        since: ${{ github.sha }}
         command: replay
 
     - name: "Test replay: verify output"
@@ -237,7 +422,6 @@ jobs:
       run: |
         git fetch origin ${{ env.TEST_BRANCH }}
 
-        # The HEAD should be different (new signed commits)
         new_head=$(git rev-parse origin/${{ env.TEST_BRANCH }})
         old_head="${{ steps.pre-replay.outputs.head_sha }}"
 
@@ -249,7 +433,6 @@ jobs:
           exit 1
         fi
 
-        # But the commit messages should still be there
         log=$(git log origin/${{ env.TEST_BRANCH }} --oneline -3)
         echo "Remote log:"
         echo "$log"
@@ -265,13 +448,12 @@ jobs:
 
         echo "Replay test passed: commits were replayed with new hashes"
 
-    # Test: replay single commit (common case: one action-generated unsigned commit)
-    - name: "Test replay single: sync and record base"
-      id: replay-single-setup
+    # ---- replay (single commit) ----
+
+    - name: "Test replay single: reset"
       run: |
-        git fetch origin ${{ env.TEST_BRANCH }}
-        git reset --hard origin/${{ env.TEST_BRANCH }}
-        echo "base_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+        git push origin ${{ github.sha }}:refs/heads/${{ env.TEST_BRANCH }} --force
+        git reset --hard ${{ github.sha }}
 
     - name: "Test replay single: create one commit with regular git push"
       run: |
@@ -291,7 +473,7 @@ jobs:
       uses: ./action-template
       with:
         branch: ${{ env.TEST_BRANCH }}
-        since: ${{ steps.replay-single-setup.outputs.base_sha }}
+        since: ${{ github.sha }}
         command: replay
 
     - name: "Test replay single: verify"
