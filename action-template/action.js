@@ -81,6 +81,9 @@ function main() {
 
   if(dryrun.toLowerCase() === "true") { args.push("--dry-run") }
 
+  const signAttempts = process.env["INPUT_SIGN-ATTEMPTS"] || "";
+  if(signAttempts !== "") { args.push("--sign-attempts", signAttempts) }
+
   if (command === "commit") {
     const author = process.env["INPUT_AUTHOR"] || "";
     const message = process.env["INPUT_MESSAGE"] || "";

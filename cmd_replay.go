@@ -55,6 +55,7 @@ func (c *ReplayCmd) Run() error {
 	client := NewClient(ctx, token, c.Target.Owner(), c.Target.Repository(), c.Branch)
 	client.dryrun = c.DryRun
 	client.force = true
+	client.signAttempts = c.SignAttempts
 
 	// Validate remote HEAD against --head-sha if provided
 	if _, err := c.ValidateRemoteHead(ctx, client); err != nil {

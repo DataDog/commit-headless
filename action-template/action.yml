@@ -38,6 +38,9 @@ inputs:
     required: true
   since:
     description: 'For replay, the base commit to replay from (exclusive)'
+  sign-attempts:
+    description: 'Max attempts to create each commit with a valid signature. Set to 0 to skip verification.'
+    default: 5
   dry-run:
     description: 'Stop processing just before actually making changes to the remote. Note that the pushed_ref output will be a zeroed commit hash.'
     default: false

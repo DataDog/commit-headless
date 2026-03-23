@@ -21,6 +21,7 @@ For source code and CLI documentation, see the [main branch](https://github.com/
 | `head-sha` | Expected HEAD SHA (safety check) or branch point | No | |
 | `create-branch` | Create the branch if it doesn't exist (requires `head-sha`) | No | `false` |
 | `force` | Force-update the branch ref (requires `head-sha`) | No | `false` |
+| `sign-attempts` | Max attempts to create each commit with a valid signature (0 to skip) | No | `5` |
 | `dry-run` | Skip actual remote writes | No | `false` |
 | `message` | Commit message (for `commit` command) | No | |
 | `author` | Commit author (for `commit` command) | No | github-actions bot |

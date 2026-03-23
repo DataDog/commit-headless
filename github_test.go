@@ -31,7 +31,7 @@ func TestBuildTreeEntries(t *testing.T) {
 		},
 	}
 
-	// Build tree entries the same way PushChange does (without making API calls)
+	// Build tree entries the same way CreateChange does (without making API calls)
 	var addedPaths, deletedPaths []string
 	for path, fe := range change.entries {
 		if fe.Content == nil {
@@ -190,7 +190,7 @@ func TestCreateBranch(t *testing.T) {
 	})
 }
 
-func TestPushChange(t *testing.T) {
+func TestCreateChange(t *testing.T) {
 	t.Run("dry run returns zero hash", func(t *testing.T) {
 		client := &Client{
 			owner:  "test-owner",
@@ -207,7 +207,7 @@ func TestPushChange(t *testing.T) {
 			},
 		}
 
-		sha, err := client.PushChange(context.Background(), "head-sha", change)
+		sha, err := client.CreateChange(context.Background(), "head-sha", change)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -223,7 +223,6 @@ func TestPushChange(t *testing.T) {
 			createBlobCalled bool
 			createTreeCalled bool
 			commitCalled     bool
-			updateRefCalled  bool
 		)
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -267,14 +266,6 @@ func TestPushChange(t *testing.T) {
 					SHA: github.Ptr("new-commit-sha"),
 				})
 
-			case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/repos/test-owner/test-repo/git/refs/"):
-				updateRefCalled = true
-				json.NewEncoder(w).Encode(github.Reference{
-					Object: &github.GitObject{
-						SHA: github.Ptr("new-commit-sha"),
-					},
-				})
-
 			default:
 				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 				w.WriteHeader(http.StatusNotFound)
@@ -291,7 +282,7 @@ func TestPushChange(t *testing.T) {
 			},
 		}
 
-		sha, err := client.PushChange(context.Background(), "parent-sha", change)
+		sha, err := client.CreateChange(context.Background(), "parent-sha", change)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -310,9 +301,6 @@ func TestPushChange(t *testing.T) {
 		}
 		if !commitCalled {
 			t.Error("CreateCommit was not called")
-		}
-		if !updateRefCalled {
-			t.Error("UpdateRef was not called")
 		}
 	})
 
@@ -372,7 +360,7 @@ func TestPushChange(t *testing.T) {
 			},
 		}
 
-		_, err := client.PushChange(context.Background(), "parent-sha", change)
+		_, err := client.CreateChange(context.Background(), "parent-sha", change)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -432,7 +420,7 @@ func TestPushChange(t *testing.T) {
 			entries: map[string]FileEntry{"file.txt": newFileEntry([]byte("x"))},
 		}
 
-		_, err := client.PushChange(context.Background(), "parent", change)
+		_, err := client.CreateChange(context.Background(), "parent", change)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -458,7 +446,7 @@ func TestPushChange(t *testing.T) {
 			entries: map[string]FileEntry{"file.txt": newFileEntry([]byte("x"))},
 		}
 
-		_, err := client.PushChange(context.Background(), "nonexistent", change)
+		_, err := client.CreateChange(context.Background(), "nonexistent", change)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -491,7 +479,7 @@ func TestPushChange(t *testing.T) {
 			entries: map[string]FileEntry{"file.txt": newFileEntry([]byte("x"))},
 		}
 
-		_, err := client.PushChange(context.Background(), "parent", change)
+		_, err := client.CreateChange(context.Background(), "parent", change)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -525,7 +513,7 @@ func TestPushChange(t *testing.T) {
 			entries: map[string]FileEntry{"file.txt": newFileEntry([]byte("x"))},
 		}
 
-		_, err := client.PushChange(context.Background(), "parent", change)
+		_, err := client.CreateChange(context.Background(), "parent", change)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -562,7 +550,7 @@ func TestPushChange(t *testing.T) {
 			entries: map[string]FileEntry{"file.txt": newFileEntry([]byte("x"))},
 		}
 
-		_, err := client.PushChange(context.Background(), "parent", change)
+		_, err := client.CreateChange(context.Background(), "parent", change)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -571,45 +559,6 @@ func TestPushChange(t *testing.T) {
 		}
 	})
 
-	t.Run("update ref fails", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-
-			switch {
-			case strings.HasPrefix(r.URL.Path, "/repos/test-owner/test-repo/git/commits/"):
-				json.NewEncoder(w).Encode(github.Commit{
-					Tree: &github.Tree{SHA: github.Ptr("tree-sha")},
-				})
-			case r.URL.Path == "/repos/test-owner/test-repo/git/blobs":
-				w.WriteHeader(http.StatusCreated)
-				json.NewEncoder(w).Encode(github.Blob{SHA: github.Ptr("blob-sha")})
-			case r.URL.Path == "/repos/test-owner/test-repo/git/trees":
-				w.WriteHeader(http.StatusCreated)
-				json.NewEncoder(w).Encode(github.Tree{SHA: github.Ptr("tree-sha")})
-			case r.Method == http.MethodPost && r.URL.Path == "/repos/test-owner/test-repo/git/commits":
-				w.WriteHeader(http.StatusCreated)
-				json.NewEncoder(w).Encode(github.Commit{SHA: github.Ptr("commit-sha")})
-			case r.Method == http.MethodPatch:
-				w.WriteHeader(http.StatusConflict)
-			}
-		}))
-		defer server.Close()
-
-		client := newTestClient(t, server)
-		change := Change{
-			hash:    "local",
-			message: "Test",
-			entries: map[string]FileEntry{"file.txt": newFileEntry([]byte("x"))},
-		}
-
-		_, err := client.PushChange(context.Background(), "parent", change)
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
-		if !strings.Contains(err.Error(), "update ref") {
-			t.Errorf("expected 'update ref' error, got %q", err.Error())
-		}
-	})
 }
 
 func TestPushChanges(t *testing.T) {
@@ -708,6 +657,44 @@ func TestPushChanges(t *testing.T) {
 		}
 		if count != 2 {
 			t.Errorf("expected count 2 (failed on second), got %d", count)
+		}
+	})
+
+	t.Run("update ref fails", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+
+			switch {
+			case strings.HasPrefix(r.URL.Path, "/repos/test-owner/test-repo/git/commits/"):
+				json.NewEncoder(w).Encode(github.Commit{
+					Tree: &github.Tree{SHA: github.Ptr("tree-sha")},
+				})
+			case r.URL.Path == "/repos/test-owner/test-repo/git/blobs":
+				w.WriteHeader(http.StatusCreated)
+				json.NewEncoder(w).Encode(github.Blob{SHA: github.Ptr("blob-sha")})
+			case r.URL.Path == "/repos/test-owner/test-repo/git/trees":
+				w.WriteHeader(http.StatusCreated)
+				json.NewEncoder(w).Encode(github.Tree{SHA: github.Ptr("tree-sha")})
+			case r.Method == http.MethodPost && r.URL.Path == "/repos/test-owner/test-repo/git/commits":
+				w.WriteHeader(http.StatusCreated)
+				json.NewEncoder(w).Encode(github.Commit{SHA: github.Ptr("commit-sha")})
+			case r.Method == http.MethodPatch:
+				w.WriteHeader(http.StatusConflict)
+			}
+		}))
+		defer server.Close()
+
+		client := newTestClient(t, server)
+		changes := []Change{
+			{hash: "h1", message: "First", entries: map[string]FileEntry{"a.txt": newFileEntry([]byte("a"))}},
+		}
+
+		_, _, err := client.PushChanges(context.Background(), "parent", changes...)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "update ref") {
+			t.Errorf("expected 'update ref' error, got %q", err.Error())
 		}
 	})
 }

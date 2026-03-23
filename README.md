@@ -2,9 +2,10 @@
 
 A binary tool and GitHub Action for creating signed commits from headless workflows.
 
-`commit-headless` turns local commits into signed commits on the remote using the GitHub REST API.
-When commits are created using the API (instead of via `git push`), they are signed and verified by
-GitHub on behalf of the credentials used to access the API.
+`commit-headless` turns local commits into commits on the remote using the GitHub REST API.
+When commits are created using the API with a GitHub App or installation token (such as
+`github.token` in Actions), they are signed and verified by GitHub. Commits created with a personal
+access token or OAuth token will not be signed.
 
 File modes (such as the executable bit) are preserved when pushing commits.
 
@@ -131,6 +132,26 @@ Basic usage:
 **Warning:** This command force-pushes to the remote branch. The `--since` commit must be an
 ancestor of the branch HEAD.
 
+## Signature verification
+
+By default, `commit-headless` verifies that each commit created via the API is signed by GitHub.
+If a commit is not signed, it retries with exponential backoff (1s, 2s, 4s, ...) up to
+`--sign-attempts` times (default: 5).
+
+Whether GitHub signs a commit depends on the token type:
+
+- **GitHub App / installation tokens** (including `github.token` in Actions): commits are signed
+  and verified by GitHub.
+- **Personal access tokens / OAuth tokens**: commits are not signed. Set `--sign-attempts 0` to
+  skip verification when using these token types.
+
+Even with a valid token, GitHub may occasionally fail to sign a commit. This has been observed
+internally and is not consistently reproducible. The retry mechanism exists as a safety net for
+these transient failures.
+
+If all attempts are exhausted without a signed commit, `commit-headless` exits with an error. This
+ensures unsigned commits are never silently pushed to the remote.
+
 ## Try it
 
 Create a local commit and push it to a new branch:
@@ -145,7 +166,8 @@ commit-headless push \
     -T owner/repo \
     --branch bot-branch \
     --head-sha "$(git rev-parse HEAD^)" \
-    --create-branch
+    --create-branch \
+    --sign-attempts 0
 ```
 
 The `--head-sha "$(git rev-parse HEAD^)"` tells commit-headless to create the branch from the
@@ -154,6 +176,6 @@ parent of your new commit, so only your new commit gets pushed.
 Or push to an existing branch:
 
 ```
-commit-headless push -T owner/repo --branch existing-branch
+commit-headless push -T owner/repo --branch existing-branch --sign-attempts 0
 ```
 

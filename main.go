@@ -40,11 +40,12 @@ func (f targetFlag) Repository() string {
 
 // baseFlags are shared among all commands that interact with the remote.
 type baseFlags struct {
-	Target   targetFlag `name:"target" short:"T" required:"" help:"Target repository in owner/repo format."`
-	Branch   string     `required:"" help:"Name of the target branch on the remote."`
-	HeadSha  string     `name:"head-sha" help:"Expected commit sha of the remote branch, or the commit sha to branch from."`
-	DryRun   bool       `name:"dry-run" help:"Perform everything except the final remote writes to GitHub."`
-	RepoPath string     `name:"repo-path" default:"." help:"Path to the local repository. Defaults to the current directory."`
+	Target       targetFlag `name:"target" short:"T" required:"" help:"Target repository in owner/repo format."`
+	Branch       string     `required:"" help:"Name of the target branch on the remote."`
+	HeadSha      string     `name:"head-sha" help:"Expected commit sha of the remote branch, or the commit sha to branch from."`
+	SignAttempts int        `name:"sign-attempts" default:"5" help:"Max attempts to create each commit with a valid signature. Set to 0 to skip verification."`
+	DryRun       bool       `name:"dry-run" help:"Perform everything except the final remote writes to GitHub."`
+	RepoPath     string     `name:"repo-path" default:"." help:"Path to the local repository. Defaults to the current directory."`
 }
 
 // ValidateHeadSha checks that --head-sha is a valid full-length hex commit hash, if provided.

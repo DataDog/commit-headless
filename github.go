@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/go-github/v81/github"
 	"golang.org/x/oauth2"
@@ -36,8 +37,9 @@ type Client struct {
 	repo   string
 	branch string
 
-	dryrun bool
-	force  bool
+	dryrun       bool
+	force        bool
+	signAttempts int
 }
 
 // NewClient returns a Client configured to make GitHub requests for branch owned by owner/repo on
@@ -95,26 +97,36 @@ func (c *Client) CreateBranch(ctx context.Context, headSha string) (string, erro
 	return created.GetObject().GetSHA(), nil
 }
 
-// PushChanges takes a list of changes and a commit hash and produces commits using the GitHub REST API.
-// The commit hash is expected to be the current head of the remote branch, see [GetHeadCommitHash]
-// for more.
+// PushChanges creates commits for each change, then updates the branch ref once at the end.
+// This is all-or-nothing: if any commit fails, the branch ref is not updated.
 // It returns the number of changes that were successfully pushed, the new head reference hash, and
 // any error encountered.
 func (c *Client) PushChanges(ctx context.Context, headCommit string, changes ...Change) (int, string, error) {
 	var err error
 	for i, change := range changes {
-		headCommit, err = c.PushChange(ctx, headCommit, change)
+		headCommit, err = c.CreateChange(ctx, headCommit, change)
 		if err != nil {
 			return i + 1, "", fmt.Errorf("push change %d: %w", i+i, err)
+		}
+	}
+
+	if !c.dryrun {
+		_, _, err = c.git.UpdateRef(ctx, c.owner, c.repo, "refs/heads/"+c.branch, github.UpdateRef{
+			SHA:   headCommit,
+			Force: github.Ptr(c.force),
+		})
+		if err != nil {
+			return len(changes), "", fmt.Errorf("update ref: %w", err)
 		}
 	}
 
 	return len(changes), headCommit, nil
 }
 
-// PushChange pushes a single change using the REST API.
-// It returns the hash of the pushed commit or an error.
-func (c *Client) PushChange(ctx context.Context, headCommit string, change Change) (string, error) {
+// CreateChange creates a single commit from a change using the REST API.
+// It does not update the branch ref — that is done by PushChanges after all commits succeed.
+// It returns the hash of the created commit or an error.
+func (c *Client) CreateChange(ctx context.Context, headCommit string, change Change) (string, error) {
 	shortHash := change.hash
 	if len(shortHash) > 8 {
 		shortHash = shortHash[:8]
@@ -186,28 +198,44 @@ func (c *Client) PushChange(ctx context.Context, headCommit string, change Chang
 		return "", fmt.Errorf("create tree: %w", err)
 	}
 
-	// Create commit
+	// Create commit (with signature verification retry)
 	message := change.Headline()
 	if body := change.Body(); body != "" {
 		message = message + "\n\n" + body
 	}
 
-	commit, _, err := c.git.CreateCommit(ctx, c.owner, c.repo, github.Commit{
+	commitInput := github.Commit{
 		Message: github.Ptr(message),
 		Tree:    &github.Tree{SHA: tree.SHA},
 		Parents: []*github.Commit{{SHA: github.Ptr(headCommit)}},
-	}, nil)
+	}
+
+	commit, _, err := c.git.CreateCommit(ctx, c.owner, c.repo, commitInput, nil)
 	if err != nil {
 		return "", fmt.Errorf("create commit: %w", err)
 	}
 
-	// Update ref
-	_, _, err = c.git.UpdateRef(ctx, c.owner, c.repo, "refs/heads/"+c.branch, github.UpdateRef{
-		SHA:   commit.GetSHA(),
-		Force: github.Ptr(c.force),
-	})
-	if err != nil {
-		return "", fmt.Errorf("update ref: %w", err)
+	if c.signAttempts > 0 {
+		backoff := 1 * time.Second
+		for attempt := 1; attempt <= c.signAttempts; attempt++ {
+			if commit.GetVerification().GetVerified() {
+				break
+			}
+
+			if attempt == c.signAttempts {
+				reason := commit.GetVerification().GetReason()
+				return "", fmt.Errorf("commit %s was not signed after %d attempt(s) (reason: %s)", commit.GetSHA(), c.signAttempts, reason)
+			}
+
+			logger.Warningf("Commit %s not signed (attempt %d/%d, reason: %s), retrying in %s...", commit.GetSHA(), attempt, c.signAttempts, commit.GetVerification().GetReason(), backoff)
+			time.Sleep(backoff)
+			backoff *= 2
+
+			commit, _, err = c.git.CreateCommit(ctx, c.owner, c.repo, commitInput, nil)
+			if err != nil {
+				return "", fmt.Errorf("create commit (attempt %d): %w", attempt+1, err)
+			}
+		}
 	}
 
 	commitSha := commit.GetSHA()

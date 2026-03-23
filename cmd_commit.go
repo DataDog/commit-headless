@@ -86,6 +86,7 @@ func (c *CommitCmd) Run() error {
 	client := NewClient(ctx, token, c.Target.Owner(), c.Target.Repository(), c.Branch)
 	client.dryrun = c.DryRun
 	client.force = c.Force
+	client.signAttempts = c.SignAttempts
 
 	baseCommit, err := c.ResolveBaseCommit(ctx, client)
 	if err != nil {
