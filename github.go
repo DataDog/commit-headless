@@ -1,321 +1,245 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/google/go-github/v81/github"
 	"golang.org/x/oauth2"
 )
 
 var ErrNoRemoteBranch = errors.New("branch does not exist on the remote")
 
+// RepositoriesAPI defines the subset of github.RepositoriesService methods needed by this project.
+type RepositoriesAPI interface {
+	GetBranch(ctx context.Context, owner, repo, branch string, maxRedirects int) (*github.Branch, *github.Response, error)
+}
+
+// GitAPI defines the subset of github.GitService methods needed by this project.
+type GitAPI interface {
+	CreateRef(ctx context.Context, owner, repo string, ref github.CreateRef) (*github.Reference, *github.Response, error)
+	GetCommit(ctx context.Context, owner, repo, sha string) (*github.Commit, *github.Response, error)
+	CreateBlob(ctx context.Context, owner, repo string, blob github.Blob) (*github.Blob, *github.Response, error)
+	CreateTree(ctx context.Context, owner, repo, baseTree string, entries []*github.TreeEntry) (*github.Tree, *github.Response, error)
+	CreateCommit(ctx context.Context, owner, repo string, commit github.Commit, opts *github.CreateCommitOptions) (*github.Commit, *github.Response, error)
+	UpdateRef(ctx context.Context, owner, repo, ref string, updateRef github.UpdateRef) (*github.Reference, *github.Response, error)
+}
+
 // Client provides methods for interacting with a remote repository on GitHub
 type Client struct {
-	httpC  *http.Client
+	repos  RepositoriesAPI
+	git    GitAPI
 	owner  string
 	repo   string
 	branch string
 
-	dryrun bool
-
-	// Used for testing purposes
-	baseURL string
+	dryrun       bool
+	force        bool
+	signAttempts int
 }
 
 // NewClient returns a Client configured to make GitHub requests for branch owned by owner/repo on
 // GitHub using the oauth token in token.
 func NewClient(ctx context.Context, token, owner, repo, branch string) *Client {
-	tokensrc := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: token},
-	)
+	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
+	httpC := oauth2.NewClient(ctx, ts)
+	ghClient := github.NewClient(httpC)
 
-	httpC := oauth2.NewClient(ctx, tokensrc)
 	return &Client{
-		httpC: httpC,
-		owner: owner, repo: repo, branch: branch,
-		baseURL: "https://api.github.com",
+		repos:  ghClient.Repositories,
+		git:    ghClient.Git,
+		owner:  owner,
+		repo:   repo,
+		branch: branch,
 	}
-}
-
-func (c *Client) branchURL() string {
-	return fmt.Sprintf("%s/repos/%s/%s/branches/%s", c.baseURL, c.owner, c.repo, c.branch)
-}
-
-func (c *Client) refsURL() string {
-	return fmt.Sprintf("%s/repos/%s/%s/git/refs", c.baseURL, c.owner, c.repo)
-}
-
-func (c *Client) browseCommitsURL() string {
-	return fmt.Sprintf("https://github.com/%s/%s/commits/%s", c.owner, c.repo, c.branch)
 }
 
 func (c *Client) commitURL(hash string) string {
 	return fmt.Sprintf("https://github.com/%s/%s/commit/%s", c.owner, c.repo, hash)
 }
 
-func (c *Client) graphqlURL() string {
-	return fmt.Sprintf("%s/graphql", c.baseURL)
+func (c *Client) compareURL(base, head string) string {
+	return fmt.Sprintf("https://github.com/%s/%s/compare/%s...%s", c.owner, c.repo, base, head)
 }
 
 // GetHeadCommitHash returns the current head commit hash for the configured repository and branch
 func (c *Client) GetHeadCommitHash(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.branchURL(), nil)
+	branch, resp, err := c.repos.GetBranch(ctx, c.owner, c.repo, c.branch, 0)
 	if err != nil {
-		return "", fmt.Errorf("prepare http request: %w", err)
-	}
-
-	resp, err := c.httpC.Do(req)
-	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return "", fmt.Errorf("get branch %q: %w", c.branch, ErrNoRemoteBranch)
+		}
 		return "", fmt.Errorf("get commit hash: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return "", fmt.Errorf("get branch %q: %w", c.branch, ErrNoRemoteBranch)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("get commit hash: http %d", resp.StatusCode)
-	}
-
-	payload := struct {
-		Commit struct {
-			Sha string
-		}
-	}{}
-
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return "", fmt.Errorf("decode commit hash response: %w", err)
-	}
-
-	return payload.Commit.Sha, nil
+	return branch.GetCommit().GetSHA(), nil
 }
 
 // CreateBranch attempts to create c.branch using headSha as the branch point
 func (c *Client) CreateBranch(ctx context.Context, headSha string) (string, error) {
-	log("Creating branch from commit %s\n", headSha)
+	logger.Printf("Creating branch from commit %s\n", headSha)
 
-	var input bytes.Buffer
-
-	err := json.NewEncoder(&input).Encode(map[string]string{
-		"ref": fmt.Sprintf("refs/heads/%s", c.branch),
-		"sha": headSha,
-	})
-	if err != nil {
-		return "", err
+	ref := github.CreateRef{
+		Ref: fmt.Sprintf("refs/heads/%s", c.branch),
+		SHA: headSha,
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.refsURL(), &input)
+	created, resp, err := c.git.CreateRef(ctx, c.owner, c.repo, ref)
 	if err != nil {
-		return "", fmt.Errorf("prepare http request: %w", err)
-	}
-
-	resp, err := c.httpC.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("create branch request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusUnprocessableEntity {
-		// Parse the error response to distinguish between different failure modes
-		var errResp struct {
-			Message string `json:"message"`
+		if resp != nil && resp.StatusCode == http.StatusUnprocessableEntity {
+			return "", fmt.Errorf("create branch: http 422 (does the branch point exist?)")
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&errResp); err == nil {
-			if strings.Contains(errResp.Message, "Reference already exists") {
-				return "", fmt.Errorf("create branch: branch %q already exists", c.branch)
-			}
-			if strings.Contains(errResp.Message, "Object does not exist") {
-				return "", fmt.Errorf("create branch: commit %q does not exist", headSha)
-			}
-			return "", fmt.Errorf("create branch: %s", errResp.Message)
-		}
-		return "", fmt.Errorf("create branch: http 422")
+		return "", fmt.Errorf("create branch: %w", err)
 	}
-
-	if resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("create branch: http %d", resp.StatusCode)
-	}
-
-	payload := struct {
-		Commit struct {
-			Sha string
-		} `json:"object"`
-	}{}
-
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return "", fmt.Errorf("decode create branch response: %w", err)
-	}
-
-	return payload.Commit.Sha, nil
+	return created.GetObject().GetSHA(), nil
 }
 
-// PushChanges takes a list of changes and a commit hash and produces commits using the GitHub GraphQL API.
-// The commit hash is expected to be the current head of the remote branch, see [GetHeadCommitHash]
-// for more.
+// PushChanges creates commits for each change, then updates the branch ref once at the end.
+// This is all-or-nothing: if any commit fails, the branch ref is not updated.
 // It returns the number of changes that were successfully pushed, the new head reference hash, and
 // any error encountered.
 func (c *Client) PushChanges(ctx context.Context, headCommit string, changes ...Change) (int, string, error) {
 	var err error
 	for i, change := range changes {
-		headCommit, err = c.PushChange(ctx, headCommit, change)
+		headCommit, err = c.CreateChange(ctx, headCommit, change)
 		if err != nil {
 			return i + 1, "", fmt.Errorf("push change %d: %w", i+i, err)
+		}
+	}
+
+	if !c.dryrun {
+		_, _, err = c.git.UpdateRef(ctx, c.owner, c.repo, "refs/heads/"+c.branch, github.UpdateRef{
+			SHA:   headCommit,
+			Force: github.Ptr(c.force),
+		})
+		if err != nil {
+			return len(changes), "", fmt.Errorf("update ref: %w", err)
 		}
 	}
 
 	return len(changes), headCommit, nil
 }
 
-// Splits a Change into added and deleted slices, taking into account existing files vs empty files
-func (c *Client) splitChange(change Change) (added []fileAddition, deleted []fileDeletion) {
-	for path, content := range change.entries {
-		if content == nil {
-			deleted = append(deleted, fileDeletion{
-				Path: path,
-			})
-		} else {
-			added = append(added, fileAddition{
-				Path:     path,
-				Contents: content,
-			})
+// CreateChange creates a single commit from a change using the REST API.
+// It does not update the branch ref — that is done by PushChanges after all commits succeed.
+// It returns the hash of the created commit or an error.
+func (c *Client) CreateChange(ctx context.Context, headCommit string, change Change) (string, error) {
+	shortHash := change.hash
+	if len(shortHash) > 8 {
+		shortHash = shortHash[:8]
+	}
+	endGroup := logger.Group(fmt.Sprintf("Commit %s: %s", shortHash, change.Headline()))
+	defer endGroup()
+
+	// Log commit details
+	if change.author != "" {
+		logger.Printf("Author: %s\n", change.author)
+	}
+	if body := change.Body(); body != "" {
+		logger.Printf("Body: %s\n", body)
+	}
+	logger.Printf("Changed files: %d\n", len(change.entries))
+	for path, fe := range change.entries {
+		action := "MODIFY"
+		if fe.Content == nil {
+			action = "DELETE"
 		}
-	}
-
-	return added, deleted
-}
-
-// PushChange pushes a single change using the GraphQL API.
-// It returns the hash of the pushed commit or an error.
-func (c *Client) PushChange(ctx context.Context, headCommit string, change Change) (string, error) {
-	// Turn the change into a createCommitOnBranchInput
-	added, deleted := c.splitChange(change)
-
-	input := createCommitOnBranchInput{
-		Branch: commitInputBranch{
-			Name:   c.branch,
-			Target: fmt.Sprintf("%s/%s", c.owner, c.repo),
-		},
-		ExpectedRef: headCommit,
-		Message: commitInputMessage{
-			Headline: change.Headline(),
-			Body:     change.Body(),
-		},
-		Changes: commitInputChanges{
-			Additions: added,
-			Deletions: deleted,
-		},
-	}
-
-	query := wrapper{
-		Query: `
-			mutation ($input: CreateCommitOnBranchInput!) {
-				createCommitOnBranch(input: $input) {
-					commit {
-						oid
-					}
-				}
-			}
-		`,
-		Variables: map[string]any{"input": input},
-	}
-
-	// Encode the query to JSON (so we can print it in case of an error)
-	queryJSON, err := json.Marshal(query)
-	if err != nil {
-		return "", fmt.Errorf("encode mutation: %w", err)
+		logger.Printf("  - %s: %s\n", action, path)
 	}
 
 	if c.dryrun {
-		log("Dry run enabled, not writing commit.\n")
+		logger.Notice("Dry run enabled, not writing commit")
 		return strings.Repeat("0", len(change.hash)), nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.graphqlURL(), bytes.NewReader(queryJSON))
+	// Get the parent commit's tree SHA
+	parentCommit, _, err := c.git.GetCommit(ctx, c.owner, c.repo, headCommit)
 	if err != nil {
-		return "", fmt.Errorf("prepare mutation request: %w", err)
+		return "", fmt.Errorf("get parent commit: %w", err)
+	}
+	baseTreeSHA := parentCommit.GetTree().GetSHA()
+
+	// Build tree entries
+	var entries []*github.TreeEntry
+	for path, fe := range change.entries {
+		// Use the file's mode, defaulting to 100644 for regular files
+		mode := fe.Mode
+		if mode == "" {
+			mode = "100644"
+		}
+
+		entry := &github.TreeEntry{
+			Path: github.Ptr(path),
+			Mode: github.Ptr(mode),
+			Type: github.Ptr("blob"),
+		}
+		if fe.Content == nil {
+			// Deletion: SHA must be empty string for go-github to omit it
+		} else {
+			// Create blob for additions/modifications
+			blob, _, err := c.git.CreateBlob(ctx, c.owner, c.repo, github.Blob{
+				Content:  github.Ptr(string(fe.Content)),
+				Encoding: github.Ptr("utf-8"),
+			})
+			if err != nil {
+				return "", fmt.Errorf("create blob for %s: %w", path, err)
+			}
+			entry.SHA = blob.SHA
+		}
+		entries = append(entries, entry)
 	}
 
-	resp, err := c.httpC.Do(req)
-	defer resp.Body.Close()
+	// Create tree
+	tree, _, err := c.git.CreateTree(ctx, c.owner, c.repo, baseTreeSHA, entries)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create tree: %w", err)
 	}
 
-	payload := struct {
-		Data struct {
-			CreateCommitOnBranch struct {
-				Commit struct {
-					ObjectID string `json:"oid"`
-				}
-			} `json:"createCommitOnBranch"`
-		}
-		Errors []struct {
-			Message string
-		}
-	}{}
-
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return "", fmt.Errorf("decode mutation response body: %w", err)
+	// Create commit (with signature verification retry)
+	message := change.Headline()
+	if body := change.Body(); body != "" {
+		message = message + "\n\n" + body
 	}
 
-	if len(payload.Errors) != 0 {
-		log("There were %d errors returned when creating the commit.\n", len(payload.Errors))
-		for _, e := range payload.Errors {
-			log("  - %s\n", e.Message)
-		}
-
-		return "", errors.New("graphql response")
+	commitInput := github.Commit{
+		Message: github.Ptr(message),
+		Tree:    &github.Tree{SHA: tree.SHA},
+		Parents: []*github.Commit{{SHA: github.Ptr(headCommit)}},
 	}
 
-	oid := payload.Data.CreateCommitOnBranch.Commit.ObjectID
-	log("Pushed commit %s -> %s\n", change.hash, oid)
-	log("  Commit URL: %s\n", c.commitURL(oid))
+	commit, _, err := c.git.CreateCommit(ctx, c.owner, c.repo, commitInput, nil)
+	if err != nil {
+		return "", fmt.Errorf("create commit: %w", err)
+	}
 
-	return oid, nil
-}
+	if c.signAttempts > 0 {
+		backoff := 1 * time.Second
+		for attempt := 1; attempt <= c.signAttempts; attempt++ {
+			if commit.GetVerification().GetVerified() {
+				break
+			}
 
-type wrapper struct {
-	Query     string         `json:"query"`
-	Variables map[string]any `json:"variables"`
-}
+			if attempt == c.signAttempts {
+				reason := commit.GetVerification().GetReason()
+				return "", fmt.Errorf("commit %s was not signed after %d attempt(s) (reason: %s)", commit.GetSHA(), c.signAttempts, reason)
+			}
 
-type createCommitOnBranchInput struct {
-	Branch      commitInputBranch  `json:"branch"`
-	ExpectedRef string             `json:"expectedHeadOid"`
-	Message     commitInputMessage `json:"message"`
-	Changes     commitInputChanges `json:"fileChanges"`
-}
+			logger.Warningf("Commit %s not signed (attempt %d/%d, reason: %s), retrying in %s...", commit.GetSHA(), attempt, c.signAttempts, commit.GetVerification().GetReason(), backoff)
+			time.Sleep(backoff)
+			backoff *= 2
 
-type commitInputBranch struct {
-	Name   string `json:"branchName"`
-	Target string `json:"repositoryNameWithOwner"`
-}
+			commit, _, err = c.git.CreateCommit(ctx, c.owner, c.repo, commitInput, nil)
+			if err != nil {
+				return "", fmt.Errorf("create commit (attempt %d): %w", attempt+1, err)
+			}
+		}
+	}
 
-type commitInputMessage struct {
-	Headline string `json:"headline"`
-	Body     string `json:"body"`
-}
+	commitSha := commit.GetSHA()
+	logger.Printf("Created: %s\n", c.commitURL(commitSha))
 
-type commitInputChanges struct {
-	Additions []fileAddition `json:"additions,omitempty"`
-	Deletions []fileDeletion `json:"deletions,omitempty"`
-}
-
-// fileAddition represents a file being added or modified.
-// Contents is always included in the JSON output, even if empty.
-type fileAddition struct {
-	Path     string `json:"path"`
-	Contents []byte `json:"contents"`
-}
-
-// fileDeletion represents a file being deleted.
-// It only contains the path; contents must not be included.
-type fileDeletion struct {
-	Path string `json:"path"`
+	return commitSha, nil
 }

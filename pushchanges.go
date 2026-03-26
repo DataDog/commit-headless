@@ -2,15 +2,14 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
 	"strings"
 )
 
-// Takes a list of changes to push to the remote identified by target.
-// Prints the last commit pushed to standard output.
-func pushChanges(ctx context.Context, owner, repository, branch, headSha string, createBranch, dryrun bool, changes ...Change) error {
+// pushChanges pushes a list of changes using the given client.
+// headSha is the resolved parent for the first commit.
+// If the client has CreateBranch behavior needed, the caller should have already handled that.
+func pushChanges(ctx context.Context, client *Client, headSha string, changes ...Change) error {
 	hashes := []string{}
 	for i := 0; i < len(changes) && i < 10; i++ {
 		hashes = append(hashes, changes[i].hash)
@@ -20,57 +19,11 @@ func pushChanges(ctx context.Context, owner, repository, branch, headSha string,
 		hashes = append(hashes, fmt.Sprintf("...and %d more.", len(changes)-10))
 	}
 
-	log("Owner: %s\n", owner)
-	log("Repository: %s\n", repository)
-	log("Branch: %s\n", branch)
-	log("Commits: %s\n", strings.Join(hashes, ", "))
+	endGroup := logger.Group(fmt.Sprintf("Pushing to %s/%s (branch: %s)", client.owner, client.repo, client.branch))
+	defer endGroup()
 
-	if headSha != "" && (!hashRegex.MatchString(headSha) || len(headSha) != 40) {
-		return fmt.Errorf("invalid head-sha %q, must be a full 40 hex digit commit hash", headSha)
-	}
-
-	if createBranch && headSha == "" {
-		return errors.New("cannot use --create-branch without supplying --head-sha")
-	}
-
-	token := getToken(os.Getenv)
-	if token == "" {
-		return errors.New("no GitHub token supplied")
-	}
-
-	client := NewClient(ctx, token, owner, repository, branch)
-	client.dryrun = dryrun
-
-	if headSha == "" {
-		remoteSha, err := client.GetHeadCommitHash(context.Background())
-		if err != nil {
-			return err
-		}
-		headSha = remoteSha
-	} else if createBranch {
-		remoteSha, err := client.CreateBranch(ctx, headSha)
-		if err != nil {
-			return err
-		}
-		headSha = remoteSha
-	}
-
-	log("Remote head commit: %s\n", headSha)
-	for _, c := range changes {
-		log("Commit %s\n", c.hash)
-		log("  Headline: %s\n", c.Headline())
-		log("  Body: %s\n", c.Body())
-		log("  Changed files: %d\n", len(c.entries))
-		for p, content := range c.entries {
-			action := "MODIFY"
-			if content == nil {
-				action = "DELETE"
-				log("    - DELETE: %s\n", p)
-			} else {
-				log("    - %s: %s (%d bytes)\n", action, p, len(content))
-			}
-		}
-	}
+	logger.Printf("Commits: %s\n", strings.Join(hashes, ", "))
+	logger.Printf("Remote head commit: %s\n", headSha)
 
 	pushed, newHead, err := client.PushChanges(ctx, headSha, changes...)
 	if err != nil {
@@ -79,12 +32,12 @@ func pushChanges(ctx context.Context, owner, repository, branch, headSha string,
 		return fmt.Errorf("pushed %d of %d changes", pushed, len(changes))
 	}
 
-	log("Pushed %d commits.\n", len(changes))
-	log("Branch URL: %s\n", client.browseCommitsURL())
+	logger.Noticef("Pushed %d commit(s): %s", len(changes), client.compareURL(headSha, newHead))
 
-	// The only thing that goes to standard output is the new head reference, allowing callers to
-	// capture stdout if they need the reference.
-	fmt.Println(newHead)
+	// Output the new head reference for capture by callers or GitHub Actions
+	if err := logger.Output("pushed_ref", newHead); err != nil {
+		return fmt.Errorf("write output: %w", err)
+	}
 
 	return nil
 }
