@@ -163,6 +163,17 @@ jobs:
           exit 1
         fi
 
+    - &verify-no-tmp-branches
+      name: Verify no leftover working branches
+      run: |
+        tmp_branches=$(git ls-remote --heads origin | grep -- '--headless-tmp-' || true)
+        if [ -n "$tmp_branches" ]; then
+          echo "ERROR: leftover working branches found:"
+          echo "$tmp_branches"
+          exit 1
+        fi
+        echo "No leftover working branches"
+
     - *cleanup
 
   test-push-no-op:
@@ -280,6 +291,7 @@ jobs:
           exit 1
         fi
 
+    - *verify-no-tmp-branches
     - *cleanup
 
   test-commit-create-branch:
@@ -421,6 +433,7 @@ jobs:
         fi
         echo "Executable bit preserved successfully"
 
+    - *verify-no-tmp-branches
     - *cleanup
 
   test-replay:
@@ -498,6 +511,7 @@ jobs:
 
         echo "Replay test passed: commits were replayed with new hashes"
 
+    - *verify-no-tmp-branches
     - *cleanup
 
   test-replay-single:
