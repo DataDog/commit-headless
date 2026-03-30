@@ -67,6 +67,10 @@ func (g *graphQLClient) Do(ctx context.Context, query string, variables map[stri
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("graphql request: http %d", resp.StatusCode)
+	}
+
 	var result struct {
 		Data   json.RawMessage `json:"data"`
 		Errors []struct {
@@ -193,7 +197,7 @@ func (c *Client) chooseStrategy(change Change) commitStrategy {
 func (c *Client) PushChanges(ctx context.Context, headCommit string, changes ...Change) (int, string, error) {
 	if c.dryrun {
 		for i, change := range changes {
-			_, err := c.CreateChange(ctx, "", headCommit, change)
+			_, _, err := c.CreateChange(ctx, "", headCommit, change)
 			if err != nil {
 				return i + 1, "", fmt.Errorf("push change %d: %w", i, err)
 			}
@@ -224,12 +228,11 @@ func (c *Client) PushChanges(ctx context.Context, headCommit string, changes ...
 
 	// Create commits on the throwaway branch
 	for i, change := range changes {
-		newHead, err := c.CreateChange(ctx, tmpBranch, headCommit, change)
+		newHead, strategy, err := c.CreateChange(ctx, tmpBranch, headCommit, change)
 		if err != nil {
 			return i + 1, "", fmt.Errorf("push change %d: %w", i, err)
 		}
 
-		strategy := c.chooseStrategy(change)
 		if strategy == strategyREST {
 			// REST creates a detached commit; advance the throwaway branch to stay in sync
 			_, _, err = c.git.UpdateRef(ctx, c.owner, c.repo, tmpRef, github.UpdateRef{
@@ -262,7 +265,9 @@ func (c *Client) PushChanges(ctx context.Context, headCommit string, changes ...
 //
 // tmpBranch is the name of the throwaway branch (without refs/heads/ prefix) used for GraphQL
 // commits. It may be empty for dry-run mode.
-func (c *Client) CreateChange(ctx context.Context, tmpBranch, headCommit string, change Change) (string, error) {
+//
+// Returns the new commit SHA, the strategy used, and any error.
+func (c *Client) CreateChange(ctx context.Context, tmpBranch, headCommit string, change Change) (string, commitStrategy, error) {
 	shortHash := change.hash
 	if len(shortHash) > 8 {
 		shortHash = shortHash[:8]
@@ -295,54 +300,72 @@ func (c *Client) CreateChange(ctx context.Context, tmpBranch, headCommit string,
 
 	if c.dryrun {
 		logger.Notice("Dry run enabled, not writing commit")
-		return strings.Repeat("0", len(change.hash)), nil
+		return strings.Repeat("0", len(change.hash)), strategy, nil
 	}
 
-	// Build the commit function based on strategy
+	// Build the commit and reset functions based on strategy.
+	// resetFn rewinds the throwaway branch before a GraphQL retry so expectedHeadOid matches again.
 	var commitFn func() (string, bool, error)
+	var resetFn func() error
 
 	switch strategy {
 	case strategyGraphQL:
+		tmpRef := fmt.Sprintf("refs/heads/%s", tmpBranch)
 		commitFn = func() (string, bool, error) {
 			return c.execGraphQLCommit(ctx, tmpBranch, headCommit, change)
+		}
+		resetFn = func() error {
+			_, _, err := c.git.UpdateRef(ctx, c.owner, c.repo, tmpRef, github.UpdateRef{
+				SHA:   headCommit,
+				Force: github.Ptr(true),
+			})
+			if err != nil {
+				return fmt.Errorf("reset working branch for retry: %w", err)
+			}
+			return nil
 		}
 	case strategyREST:
 		// Prep tree once before the retry loop
 		treeSHA, err := c.prepTree(ctx, headCommit, change)
 		if err != nil {
-			return "", err
+			return "", strategy, err
 		}
 		commitFn = func() (string, bool, error) {
 			return c.execRESTCommit(ctx, headCommit, treeSHA, change)
 		}
+		resetFn = func() error { return nil }
 	}
 
 	// Execute with signature verification retry
 	commitSha, verified, err := commitFn()
 	if err != nil {
-		return "", fmt.Errorf("create commit: %w", err)
+		return "", strategy, fmt.Errorf("create commit: %w", err)
 	}
 
 	if c.signAttempts > 0 {
 		backoff := 1 * time.Second
 		for attempt := 1; attempt <= c.signAttempts && !verified; attempt++ {
 			if attempt == c.signAttempts {
-				return "", fmt.Errorf("commit %s was not signed after %d attempt(s)", commitSha, c.signAttempts)
+				return "", strategy, fmt.Errorf("commit %s was not signed after %d attempt(s)", commitSha, c.signAttempts)
 			}
 
 			logger.Warningf("Commit %s not signed (attempt %d/%d), retrying in %s...", commitSha, attempt, c.signAttempts, backoff)
 			time.Sleep(backoff)
 			backoff *= 2
 
+			if err := resetFn(); err != nil {
+				return "", strategy, err
+			}
+
 			commitSha, verified, err = commitFn()
 			if err != nil {
-				return "", fmt.Errorf("create commit (attempt %d): %w", attempt+1, err)
+				return "", strategy, fmt.Errorf("create commit (attempt %d): %w", attempt+1, err)
 			}
 		}
 	}
 
 	logger.Printf("Created: %s\n", c.commitURL(commitSha))
-	return commitSha, nil
+	return commitSha, strategy, nil
 }
 
 // prepTree creates blobs and a tree for the REST commit path. This is called once before the

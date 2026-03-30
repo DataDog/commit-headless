@@ -225,7 +225,7 @@ func TestCreateChange(t *testing.T) {
 			},
 		}
 
-		sha, err := client.CreateChange(context.Background(), "", "head-sha", change)
+		sha, _, err := client.CreateChange(context.Background(), "", "head-sha", change)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -264,7 +264,7 @@ func TestCreateChange(t *testing.T) {
 			},
 		}
 
-		sha, err := client.CreateChange(context.Background(), "tmp-branch", "parent-sha", change)
+		sha, _, err := client.CreateChange(context.Background(), "tmp-branch", "parent-sha", change)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -336,7 +336,7 @@ func TestCreateChange(t *testing.T) {
 			},
 		}
 
-		sha, err := client.CreateChange(context.Background(), "tmp-branch", "parent-sha", change)
+		sha, _, err := client.CreateChange(context.Background(), "tmp-branch", "parent-sha", change)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -379,7 +379,7 @@ func TestCreateChange(t *testing.T) {
 			},
 		}
 
-		sha, err := client.CreateChange(context.Background(), "tmp-branch", "parent-sha", change)
+		sha, _, err := client.CreateChange(context.Background(), "tmp-branch", "parent-sha", change)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -414,7 +414,7 @@ func TestCreateChange(t *testing.T) {
 			entries: map[string]FileEntry{"file.txt": newFileEntry([]byte("x"))},
 		}
 
-		_, err := client.CreateChange(context.Background(), "tmp", "parent", change)
+		_, _, err := client.CreateChange(context.Background(), "tmp", "parent", change)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -441,7 +441,7 @@ func TestCreateChange(t *testing.T) {
 			entries: map[string]FileEntry{"script.sh": {Content: []byte("x"), Mode: "100755"}},
 		}
 
-		_, err := client.CreateChange(context.Background(), "tmp", "nonexistent", change)
+		_, _, err := client.CreateChange(context.Background(), "tmp", "nonexistent", change)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
