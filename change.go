@@ -25,6 +25,17 @@ type Change struct {
 	entries map[string]FileEntry
 }
 
+// HasNonDefaultModes returns true if any file entry has a mode other than the
+// default 100644 (regular file). Empty mode is treated as 100644.
+func (c Change) HasNonDefaultModes() bool {
+	for _, fe := range c.entries {
+		if fe.Mode != "" && fe.Mode != "100644" {
+			return true
+		}
+	}
+	return false
+}
+
 // Splits a commit message on the first blank line
 func (c Change) splitMessage() (string, string) {
 	h, b, _ := strings.Cut(c.message, "\n\n")

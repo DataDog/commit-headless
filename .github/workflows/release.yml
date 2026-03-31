@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-    - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
       with:
         go-version: '1.24'
 
@@ -46,7 +46,7 @@ jobs:
             binary: commit-headless-linux-arm64
 
     steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
     - name: download artifacts
       uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -64,7 +64,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
         fetch-depth: 0 # needed to make sure we get all tags
 
@@ -127,23 +127,14 @@ jobs:
         branch: action
         command: push
 
-    - name: check release tag
-      id: check-tag
+    - name: print release instructions
       run: |
         TAG="action/v$(cat ./dist/VERSION.txt)"
-        if git show-ref --tags --verify --quiet "refs/tags/${TAG}"; then
-          echo "Release tag ${TAG} already exists. Not releasing."
-          exit 1
-        fi
-        echo "tag=${TAG}" >> $GITHUB_OUTPUT
+        SHA="${{ steps.push-commits.outputs.pushed_ref }}"
 
-    - name: make release
-      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
-      with:
-        script: |
-          github.rest.git.createRef({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            ref: 'refs/tags/${{ steps.check-tag.outputs.tag }}',
-            sha: '${{ steps.push-commits.outputs.pushed_ref }}'
-          });
+        if git show-ref --tags --verify --quiet "refs/tags/${TAG}"; then
+          echo "::notice::Release tag ${TAG} already exists. Nothing to do."
+          exit 0
+        fi
+
+        echo "::notice::To release, run: git tag ${TAG} ${SHA} && git push origin ${TAG}"

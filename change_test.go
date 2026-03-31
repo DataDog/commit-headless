@@ -5,6 +5,28 @@ import (
 	"testing"
 )
 
+func TestHasNonDefaultModes(t *testing.T) {
+	tests := []struct {
+		name    string
+		entries map[string]FileEntry
+		want    bool
+	}{
+		{"all default", map[string]FileEntry{"a": {Mode: "100644"}}, false},
+		{"empty mode treated as default", map[string]FileEntry{"a": {Mode: ""}}, false},
+		{"executable", map[string]FileEntry{"a": {Mode: "100755"}}, true},
+		{"symlink", map[string]FileEntry{"a": {Mode: "120000"}}, true},
+		{"mixed", map[string]FileEntry{"a": {Mode: "100644"}, "b": {Mode: "100755"}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := Change{entries: tt.entries}
+			if got := c.HasNonDefaultModes(); got != tt.want {
+				t.Errorf("HasNonDefaultModes() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestChangeBody(t *testing.T) {
 	testcases := []struct {
 		input    string

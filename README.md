@@ -2,12 +2,15 @@
 
 A binary tool and GitHub Action for creating signed commits from headless workflows.
 
-`commit-headless` turns local commits into commits on the remote using the GitHub REST API.
-When commits are created using the API with a GitHub App or installation token (such as
-`github.token` in Actions), they are signed and verified by GitHub. Commits created with a personal
-access token or OAuth token will not be signed.
+`commit-headless` turns local commits into commits on the remote using the GitHub API.
+By default, commits are created using the GraphQL `createCommitOnBranch` mutation, which produces
+signed and verified commits regardless of token type. For commits that modify files with non-default
+modes (e.g., executables) and a non-user token, the tool automatically falls back to the REST API
+to preserve file modes.
 
-File modes (such as the executable bit) are preserved when pushing commits.
+File modes (such as the executable bit) are preserved when using the REST API path. The GraphQL API
+does not support file modes — all files are treated as regular files (`100644`). For user tokens
+(PAT, OAuth, `ghu_`), signing takes priority and the GraphQL path is always used.
 
 For the GitHub Action, see [the action branch][action-branch] and the associated `action/` release
 tags.
@@ -138,12 +141,9 @@ By default, `commit-headless` verifies that each commit created via the API is s
 If a commit is not signed, it retries with exponential backoff (1s, 2s, 4s, ...) up to
 `--sign-attempts` times (default: 5).
 
-Whether GitHub signs a commit depends on the token type:
-
-- **GitHub App / installation tokens** (including `github.token` in Actions): commits are signed
-  and verified by GitHub.
-- **Personal access tokens / OAuth tokens**: commits are not signed. Set `--sign-attempts 0` to
-  skip verification when using these token types.
+All token types can produce signed commits. The GraphQL API (used by default) produces signed
+commits for both user tokens and app tokens. The REST API fallback also produces signed commits
+for GitHub App / installation tokens.
 
 Even with a valid token, GitHub may occasionally fail to sign a commit. This has been observed
 internally and is not consistently reproducible. The retry mechanism exists as a safety net for
@@ -151,6 +151,21 @@ these transient failures.
 
 If all attempts are exhausted without a signed commit, `commit-headless` exits with an error. This
 ensures unsigned commits are never silently pushed to the remote.
+
+## API strategy
+
+`commit-headless` automatically chooses between the GraphQL and REST APIs on a per-commit basis:
+
+- **GraphQL** (default): Uses `createCommitOnBranch` — fewer API calls, commits are signed
+  server-side. Does not support file modes (all files are `100644`).
+- **REST** (fallback): Uses the Git Database API — more API calls, but preserves file modes.
+
+The REST fallback is used when a commit modifies files with non-default modes (e.g., `100755` for
+executables) and the token is not a user token. User tokens (`ghp_`, `gho_`, `ghu_`,
+`github_pat_`) always use GraphQL since signing is the priority.
+
+The tool logs which strategy is used for each commit. If the GraphQL path is used for a commit with
+non-default file modes, a warning is logged.
 
 ## Try it
 

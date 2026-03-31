@@ -2,6 +2,10 @@
 
 This action creates signed and verified commits on GitHub from a workflow.
 
+Commits are created using the GraphQL API by default, which produces signed commits for all token
+types. When a commit modifies files with non-default modes (e.g., executables) and a non-user token
+is used, the action automatically falls back to the REST API to preserve file modes.
+
 For source code and CLI documentation, see the [main branch](https://github.com/DataDog/commit-headless/tree/main).
 
 ## Commands
