@@ -2,8 +2,6 @@ module github.com/DataDog/commit-headless
 
 go 1.25.0
 
-toolchain go1.26.1
-
 require (
 	github.com/alecthomas/kong v1.14.0
 	github.com/google/go-github/v84 v84.0.0
