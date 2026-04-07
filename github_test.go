@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -742,6 +743,83 @@ func TestPushChanges(t *testing.T) {
 			t.Errorf("expected count 1, got %d", count)
 		}
 	})
+}
+
+func TestRESTBlobUsesBase64Encoding(t *testing.T) {
+	// Regression test: binary file content must be base64-encoded when creating
+	// blobs via the REST API. Using utf-8 encoding corrupts binary data (e.g. ELF
+	// executables) because invalid UTF-8 sequences are mangled during string
+	// conversion and JSON marshaling.
+	binaryContent := []byte{0x7f, 'E', 'L', 'F', 0x02, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFE, 0x80, 0x90}
+
+	var capturedEncoding, capturedContent string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/repos/test-owner/test-repo/git/commits/"):
+			json.NewEncoder(w).Encode(github.Commit{
+				SHA:  github.Ptr("parent-sha"),
+				Tree: &github.Tree{SHA: github.Ptr("parent-tree-sha")},
+			})
+
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/test-owner/test-repo/git/blobs":
+			var req struct {
+				Content  string `json:"content"`
+				Encoding string `json:"encoding"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+			capturedEncoding = req.Encoding
+			capturedContent = req.Content
+
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(github.Blob{SHA: github.Ptr("blob-sha")})
+
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/test-owner/test-repo/git/trees":
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(github.Tree{SHA: github.Ptr("tree-sha")})
+
+		default:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{})
+		}
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server)
+	change := Change{
+		entries: map[string]FileEntry{
+			"binary-file": {Content: binaryContent, Mode: "100755"},
+		},
+	}
+
+	_, err := client.prepTree(context.Background(), "parent-sha", change)
+	if err != nil {
+		t.Fatalf("prepTree failed: %v", err)
+	}
+
+	if capturedEncoding != "base64" {
+		t.Errorf("expected blob encoding 'base64', got %q", capturedEncoding)
+	}
+
+	expectedContent := base64.StdEncoding.EncodeToString(binaryContent)
+	if capturedContent != expectedContent {
+		t.Errorf("blob content mismatch\n  got:  %q\n  want: %q", capturedContent, expectedContent)
+	}
+
+	// Verify round-trip: decoding the sent content must yield the original bytes
+	decoded, err := base64.StdEncoding.DecodeString(capturedContent)
+	if err != nil {
+		t.Fatalf("failed to decode captured content: %v", err)
+	}
+	if len(decoded) != len(binaryContent) {
+		t.Fatalf("decoded length %d != original length %d", len(decoded), len(binaryContent))
+	}
+	for i := range binaryContent {
+		if decoded[i] != binaryContent[i] {
+			t.Errorf("byte %d: got 0x%02x, want 0x%02x", i, decoded[i], binaryContent[i])
+		}
+	}
 }
 
 func TestChooseStrategy(t *testing.T) {

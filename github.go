@@ -393,8 +393,8 @@ func (c *Client) prepTree(ctx context.Context, headCommit string, change Change)
 			// Deletion: SHA must be empty string for go-github to omit it
 		} else {
 			blob, _, err := c.git.CreateBlob(ctx, c.owner, c.repo, github.Blob{
-				Content:  github.Ptr(string(fe.Content)),
-				Encoding: github.Ptr("utf-8"),
+				Content:  github.Ptr(base64.StdEncoding.EncodeToString(fe.Content)),
+				Encoding: github.Ptr("base64"),
 			})
 			if err != nil {
 				return "", fmt.Errorf("create blob for %s: %w", path, err)
