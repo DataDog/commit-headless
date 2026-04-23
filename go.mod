@@ -6,7 +6,7 @@ toolchain go1.26.1
 
 require (
 	github.com/alecthomas/kong v1.15.0
-	github.com/google/go-github/v84 v84.0.0
+	github.com/google/go-github/v85 v85.0.0
 	golang.org/x/oauth2 v0.36.0
 )
 
