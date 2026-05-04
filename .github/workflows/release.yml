@@ -1,9 +1,6 @@
 # Runs on pushes to main, manages the `action` branch and `action/` tags family.
 name: Build and release action
 
-permissions:
-  contents: write
-
 on:
   push:
     branches:
@@ -63,6 +60,9 @@ jobs:
     needs: verify-binaries
     runs-on: ubuntu-latest
 
+    permissions:
+      id-token: write # required to mint the dd-octo-sts token below
+
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
@@ -79,6 +79,13 @@ jobs:
         chmod +x ./dist/commit-headless-linux-amd64
         ./dist/commit-headless-linux-amd64 version | awk '{print $3}' > ./dist/VERSION.txt
         echo "Current version: $(cat ./dist/VERSION.txt)"
+
+    - name: get dd-octo-sts token
+      uses: DataDog/dd-octo-sts-action@96a25462dbcb10ebf0bfd6e2ccc917d2ab235b9a # v1.0.4
+      id: octo-sts
+      with:
+        scope: ${{ github.repository }}
+        policy: self.github.release.main
 
     - name: create action branch commit
       id: create-commit
@@ -124,17 +131,24 @@ jobs:
       id: push-commits
       uses: ./ # use the action defined in the action branch
       with:
+        token: ${{ steps.octo-sts.outputs.token }}
         branch: action
         command: push
+        reset: true # exercise --reset; leaves the local checkout in sync with the remote
 
-    - name: print release instructions
+    - name: create release tag
+      env:
+        GH_TOKEN: ${{ steps.octo-sts.outputs.token }}
       run: |
         TAG="action/v$(cat ./dist/VERSION.txt)"
         SHA="${{ steps.push-commits.outputs.pushed_ref }}"
 
-        if git show-ref --tags --verify --quiet "refs/tags/${TAG}"; then
+        if gh api "repos/${{ github.repository }}/git/ref/tags/${TAG}" --silent >/dev/null 2>&1; then
           echo "::notice::Release tag ${TAG} already exists. Nothing to do."
           exit 0
         fi
 
-        echo "::notice::To release, run: git tag ${TAG} ${SHA} && git push origin ${TAG}"
+        gh api -X POST "repos/${{ github.repository }}/git/refs" \
+          -f "ref=refs/tags/${TAG}" \
+          -f "sha=${SHA}"
+        echo "::notice::Created tag ${TAG} at ${SHA}"

@@ -560,6 +560,160 @@ jobs:
     - *verify-no-tmp-branches
     - *cleanup
 
+  test-reset:
+    runs-on: ubuntu-latest
+    needs: build
+    env: *env
+    steps:
+    - *checkout
+    - *download
+    - *configure-git
+    - *create-branch
+
+    - name: Switch to local branch matching TEST_BRANCH and commit
+      run: |
+        git switch -c ${{ env.TEST_BRANCH }}
+
+        echo "reset test" > reset-file.txt
+        git add reset-file.txt
+        git commit -m "test: reset commit"
+
+    - name: Capture pre-push local HEAD
+      id: pre-push
+      run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+    - name: Push with reset
+      id: push
+      uses: ./action/
+      with:
+        branch: ${{ env.TEST_BRANCH }}
+        command: push
+        reset: true
+
+    - name: Verify local HEAD now matches remote (re-signed) commit
+      run: |
+        pushed="${{ steps.push.outputs.pushed_ref }}"
+        local_after=$(git rev-parse HEAD)
+        pre_push="${{ steps.pre-push.outputs.sha }}"
+
+        echo "Pre-push local:  $pre_push"
+        echo "Pushed (remote): $pushed"
+        echo "Post-push local: $local_after"
+
+        if [ "$local_after" = "$pre_push" ]; then
+          echo "ERROR: local HEAD unchanged; --reset did not run"
+          exit 1
+        fi
+        if [ "$local_after" != "$pushed" ]; then
+          echo "ERROR: local HEAD ($local_after) does not match pushed remote ($pushed)"
+          exit 1
+        fi
+
+    - *verify-no-tmp-branches
+    - *cleanup
+
+  test-reset-dirty-skipped:
+    runs-on: ubuntu-latest
+    needs: build
+    env: *env
+    steps:
+    - *checkout
+    - *download
+    - *configure-git
+    - *create-branch
+
+    - name: Switch to local branch and commit, then dirty the tree
+      run: |
+        git switch -c ${{ env.TEST_BRANCH }}
+
+        echo "reset-dirty test" > reset-dirty.txt
+        git add reset-dirty.txt
+        git commit -m "test: reset-dirty commit"
+
+        # Make a tracked-file modification that is NOT committed.
+        echo "dirty modification" >> README.md
+
+    - name: Capture pre-push local HEAD
+      id: pre-push
+      run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+    - name: Push with reset (no allow-dirty)
+      id: push
+      uses: ./action/
+      with:
+        branch: ${{ env.TEST_BRANCH }}
+        command: push
+        reset: true
+
+    - name: Verify reset was skipped and dirty change preserved
+      run: |
+        pushed="${{ steps.push.outputs.pushed_ref }}"
+        local_after=$(git rev-parse HEAD)
+        pre_push="${{ steps.pre-push.outputs.sha }}"
+
+        echo "Pre-push local:  $pre_push"
+        echo "Pushed (remote): $pushed"
+        echo "Post-push local: $local_after"
+
+        if [ "$local_after" != "$pre_push" ]; then
+          echo "ERROR: local HEAD changed; --reset should have skipped on a dirty tree"
+          exit 1
+        fi
+        if ! grep -q "dirty modification" README.md; then
+          echo "ERROR: dirty modification was discarded; --reset should have skipped"
+          exit 1
+        fi
+
+    - *verify-no-tmp-branches
+    - *cleanup
+
+  test-reset-allow-dirty:
+    runs-on: ubuntu-latest
+    needs: build
+    env: *env
+    steps:
+    - *checkout
+    - *download
+    - *configure-git
+    - *create-branch
+
+    - name: Switch to local branch and commit, then dirty the tree
+      run: |
+        git switch -c ${{ env.TEST_BRANCH }}
+
+        echo "reset-allow-dirty test" > reset-allow-dirty.txt
+        git add reset-allow-dirty.txt
+        git commit -m "test: reset-allow-dirty commit"
+
+        # Tracked-file modification that should be discarded by --reset --allow-dirty.
+        echo "dirty modification to be discarded" >> README.md
+
+    - name: Push with reset and allow-dirty
+      id: push
+      uses: ./action/
+      with:
+        branch: ${{ env.TEST_BRANCH }}
+        command: push
+        reset: true
+        allow-dirty: true
+
+    - name: Verify local HEAD matches remote and dirty change was discarded
+      run: |
+        pushed="${{ steps.push.outputs.pushed_ref }}"
+        local_after=$(git rev-parse HEAD)
+
+        if [ "$local_after" != "$pushed" ]; then
+          echo "ERROR: local HEAD ($local_after) does not match pushed remote ($pushed)"
+          exit 1
+        fi
+        if grep -q "dirty modification to be discarded" README.md; then
+          echo "ERROR: dirty modification still present; --allow-dirty should have discarded it"
+          exit 1
+        fi
+
+    - *verify-no-tmp-branches
+    - *cleanup
+
   test-replay-single:
     runs-on: ubuntu-latest
     needs: build
