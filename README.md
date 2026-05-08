@@ -86,6 +86,37 @@ check. The branch ref is force-updated even though the push is not a fast-forwar
 The remote HEAD (or `--head-sha` if `--create-branch` or `--force` is set) must be an ancestor of
 local HEAD. If it isn't, the push fails to prevent creating broken history.
 
+### Syncing the local checkout with --reset
+
+After a push, the local commits and the remote commits diverge in SHA (because the remote commits
+are re-signed). This is fine for one-shot CI jobs that exit after pushing, but for interactive use
+or long-running workflows (e.g., agents that continue working after a push), the local checkout is
+left out of sync with the remote.
+
+Pass `--reset` to fast-forward the local branch to the remote after a successful push:
+
+    commit-headless push -T owner/repo --branch feature --reset
+
+Under the hood this fetches the target remote and runs `git reset --hard`. The reset is skipped
+(with a warning, not an error — the push has already succeeded) if any of the following are true:
+
+- `HEAD` is detached or on a branch other than `--branch`
+- The working tree has uncommitted changes (pass `--allow-dirty` to discard them)
+- No git remote points at `--target`, or more than one does
+
+The remote is auto-discovered by matching `git remote -v` URLs against `--target`; the remote is
+not assumed to be `origin`.
+
+#### Known limitation: tags are not synchronized
+
+`--reset` only updates the branch ref and working tree. Local tags are neither pushed to the remote
+nor synchronized after a push, even if they point at commits that were just pushed. To create a
+release tag pointing at the pushed commit, use the `pushed_ref` output and the GitHub API directly,
+e.g.:
+
+    SHA="$(commit-headless push -T owner/repo --branch feature)"
+    gh api -X POST "repos/owner/repo/git/refs" -f "ref=refs/tags/v1.0.0" -f "sha=${SHA}"
+
 ## commit
 
 The `commit` command creates a single signed commit on the remote from your currently staged

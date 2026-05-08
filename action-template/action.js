@@ -81,6 +81,22 @@ function main() {
 
   if(dryrun.toLowerCase() === "true") { args.push("--dry-run") }
 
+  const reset = process.env["INPUT_RESET"] || "false"
+  if(!["true", "false"].includes(reset.toLowerCase())) {
+    console.error(`Invalid value for reset (${reset}). Must be one of true or false.`);
+    process.exit(1);
+  }
+
+  if(reset.toLowerCase() === "true") { args.push("--reset") }
+
+  const allowDirty = process.env["INPUT_ALLOW-DIRTY"] || "false"
+  if(!["true", "false"].includes(allowDirty.toLowerCase())) {
+    console.error(`Invalid value for allow-dirty (${allowDirty}). Must be one of true or false.`);
+    process.exit(1);
+  }
+
+  if(allowDirty.toLowerCase() === "true") { args.push("--allow-dirty") }
+
   const signAttempts = process.env["INPUT_SIGN-ATTEMPTS"] || "";
   if(signAttempts !== "") { args.push("--sign-attempts", signAttempts) }
 

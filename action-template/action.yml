@@ -44,6 +44,12 @@ inputs:
   dry-run:
     description: 'Stop processing just before actually making changes to the remote. Note that the pushed_ref output will be a zeroed commit hash.'
     default: false
+  reset:
+    description: 'For push, after a successful push fast-forward the local branch to the remote via "git reset --hard". Skips with a warning if HEAD is detached, on a different branch, the working tree is dirty, or no remote points at the target.'
+    default: false
+  allow-dirty:
+    description: 'For push with reset, proceed even if the working tree has uncommitted changes (they will be discarded).'
+    default: false
   author:
     description: 'For commit, the commit author'
     default: 'github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>'

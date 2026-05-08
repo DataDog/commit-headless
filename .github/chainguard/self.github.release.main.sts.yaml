@@ -1,0 +1,15 @@
+# Policy for: .github/workflows/release.yml in DataDog/commit-headless
+# Used by the release job to push commits to the action branch and create
+# action/v* tags on this repo. dd-octo-sts is required because the default
+# GITHUB_TOKEN can no longer create tag refs under current org rulesets.
+issuer: https://token.actions.githubusercontent.com
+subject: repo:DataDog/commit-headless:ref:refs/heads/main
+
+claim_pattern:
+  event_name: push
+  job_workflow_ref: DataDog/commit-headless/\.github/workflows/release\.yml@refs/heads/main
+  ref: refs/heads/main
+  repository: DataDog/commit-headless
+
+permissions:
+  contents: write

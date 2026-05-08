@@ -14,7 +14,13 @@ type Repository struct {
 
 // Fetch fetches the specified branch from origin.
 func (r *Repository) Fetch(branch string) error {
-	cmd := exec.Command("git", "fetch", "origin", branch)
+	return r.FetchFrom("origin", branch)
+}
+
+// FetchFrom fetches the given refspecs from the named remote.
+func (r *Repository) FetchFrom(remote string, refspecs ...string) error {
+	args := append([]string{"fetch", remote}, refspecs...)
+	cmd := exec.Command("git", args...)
 	cmd.Dir = r.path
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
@@ -23,6 +29,146 @@ func (r *Repository) Fetch(branch string) error {
 		return fmt.Errorf("fetch: %w", err)
 	}
 	return nil
+}
+
+// IsClean reports whether the working tree has any tracked-file changes (staged
+// or unstaged). Untracked files do not count as dirty, since `git reset --hard`
+// leaves them in place. The returned summary lists the dirty paths for logging.
+func (r *Repository) IsClean() (bool, string, error) {
+	cmd := exec.Command("git", "status", "--porcelain=v1")
+	cmd.Dir = r.path
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return false, "", fmt.Errorf("status: %s", strings.TrimSpace(string(ee.Stderr)))
+		}
+		return false, "", fmt.Errorf("status: %w", err)
+	}
+
+	var dirty []string
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		ln := scanner.Text()
+		if len(ln) < 3 || strings.HasPrefix(ln, "??") {
+			// Skip blank lines and untracked entries.
+			continue
+		}
+		dirty = append(dirty, ln)
+	}
+	if err := scanner.Err(); err != nil {
+		return false, "", err
+	}
+
+	if len(dirty) == 0 {
+		return true, "", nil
+	}
+	return false, strings.Join(dirty, "\n"), nil
+}
+
+// CurrentBranch returns the name of the local branch HEAD is on, or an empty
+// string if HEAD is detached.
+func (r *Repository) CurrentBranch() (string, error) {
+	cmd := exec.Command("git", "symbolic-ref", "--quiet", "--short", "HEAD")
+	cmd.Dir = r.path
+	out, err := cmd.Output()
+	if err != nil {
+		// `symbolic-ref --quiet` exits 1 silently when HEAD is detached.
+		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			return "", nil
+		}
+		return "", fmt.Errorf("symbolic-ref: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// ResetHard runs `git reset --hard <ref>`.
+func (r *Repository) ResetHard(ref string) error {
+	cmd := exec.Command("git", "reset", "--hard", ref)
+	cmd.Dir = r.path
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("reset: %s", strings.TrimSpace(string(ee.Stderr)))
+		}
+		return fmt.Errorf("reset: %w", err)
+	}
+	return nil
+}
+
+// RemoteForTarget returns the name of the unique git remote whose URL points
+// at github.com/<owner>/<repo>. Match is case-insensitive and accepts SSH,
+// HTTPS, and git:// URL forms with or without a trailing .git suffix.
+//
+// Returns an error if zero or multiple remotes match. On the no-match case the
+// error includes the remotes it actually parsed from `git remote -v`, so that
+// environments that rewrite display URLs (e.g., url.<base>.insteadOf) make
+// their effect visible.
+func (r *Repository) RemoteForTarget(owner, repo string) (string, error) {
+	cmd := exec.Command("git", "remote", "-v")
+	cmd.Dir = r.path
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("list remotes: %s", strings.TrimSpace(string(ee.Stderr)))
+		}
+		return "", fmt.Errorf("list remotes: %w", err)
+	}
+
+	target := strings.ToLower(fmt.Sprintf("github.com/%s/%s", owner, repo))
+	seen := map[string]string{}
+	var seenOrder []string
+	var matches []string
+
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		name, url := fields[0], fields[1]
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = url
+		seenOrder = append(seenOrder, name)
+		if remoteURLMatchesTarget(url, target) {
+			matches = append(matches, name)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no git remote points at github.com/%s/%s (saw: %s)", owner, repo, formatRemotes(seen, seenOrder))
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("multiple git remotes point at github.com/%s/%s: %s", owner, repo, strings.Join(matches, ", "))
+	}
+}
+
+func formatRemotes(remotes map[string]string, order []string) string {
+	if len(order) == 0 {
+		return "no remotes configured"
+	}
+	pairs := make([]string, 0, len(order))
+	for _, name := range order {
+		pairs = append(pairs, fmt.Sprintf("%s=%s", name, remotes[name]))
+	}
+	return strings.Join(pairs, ", ")
+}
+
+// remoteURLMatchesTarget reports whether url refers to target, where target is
+// the lower-cased "github.com/<owner>/<repo>" form. Handles trailing .git and
+// the SSH "github.com:" separator.
+func remoteURLMatchesTarget(url, target string) bool {
+	url = strings.ToLower(strings.TrimSuffix(url, ".git"))
+	// Normalize SSH-style "github.com:owner/repo" to "github.com/owner/repo".
+	if i := strings.Index(url, "github.com:"); i >= 0 {
+		url = url[:i] + "github.com/" + url[i+len("github.com:"):]
+	}
+	return strings.HasSuffix(url, target)
 }
 
 // CommitsBetween returns the commits between base and head, oldest first.

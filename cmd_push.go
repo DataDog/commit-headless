@@ -8,6 +8,8 @@ import (
 
 type PushCmd struct {
 	remoteFlags
+	Reset      bool `name:"reset" help:"After a successful push, fast-forward the local branch to the remote via 'git reset --hard'. Skips with a warning if the local checkout is on a different branch, has uncommitted changes, or no remote points at --target."`
+	AllowDirty bool `name:"allow-dirty" help:"With --reset, proceed even if the working tree has uncommitted changes (they will be discarded)."`
 }
 
 func (c *PushCmd) Help() string {
@@ -59,6 +61,16 @@ pushed commits, you should hard reset the local checkout to the remote version a
 
 	git fetch origin <branch>
 	git reset --hard origin/<branch>
+
+The --reset flag automates this. After a successful push, the tool fetches the target remote and
+runs 'git reset --hard'. The reset is skipped (with a warning, not an error) if any of the
+following are true:
+
+	- HEAD is detached or on a branch other than --branch
+	- The working tree has uncommitted changes (use --allow-dirty to override)
+	- No git remote points at the --target repository, or more than one does
+
+Local tags are not pushed or synchronized; --reset only updates the branch ref and working tree.
 `
 }
 
@@ -105,5 +117,69 @@ func (c *PushCmd) Run() error {
 		baseCommit = remoteSha
 	}
 
-	return pushChanges(ctx, client, baseCommit, changes...)
+	if err := pushChanges(ctx, client, baseCommit, changes...); err != nil {
+		return err
+	}
+
+	if c.Reset {
+		c.runReset(repo)
+	}
+
+	return nil
+}
+
+// runReset fast-forwards the local branch to the remote after a successful push.
+// All failure modes are non-fatal: the push has already succeeded, so the
+// caller's exit status should reflect that. We log warnings and remediation
+// hints for anything that prevents the reset from running.
+func (c *PushCmd) runReset(repo *Repository) {
+	branch := c.Branch
+	owner, repoName := c.Target.Owner(), c.Target.Repository()
+
+	remote, err := repo.RemoteForTarget(owner, repoName)
+	if err != nil {
+		logger.Warningf("Skipping --reset: %s. Sync manually with: git fetch <remote> %s && git reset --hard <remote>/%s", err, branch, branch)
+		return
+	}
+
+	currentBranch, err := repo.CurrentBranch()
+	if err != nil {
+		logger.Warningf("Skipping --reset: could not determine current branch: %s", err)
+		return
+	}
+	if currentBranch == "" {
+		logger.Warningf("Skipping --reset: HEAD is detached. Sync manually with: git fetch %s %s && git reset --hard %s/%s", remote, branch, remote, branch)
+		return
+	}
+	if currentBranch != branch {
+		logger.Warningf("Skipping --reset: local HEAD is on %q, not the pushed branch %q. Sync manually with: git fetch %s %s && git reset --hard %s/%s", currentBranch, branch, remote, branch, remote, branch)
+		return
+	}
+
+	clean, summary, err := repo.IsClean()
+	if err != nil {
+		logger.Warningf("Skipping --reset: could not check working tree status: %s", err)
+		return
+	}
+	if !clean && !c.AllowDirty {
+		logger.Warningf("Skipping --reset: working tree has uncommitted changes. Pass --allow-dirty to discard them, or sync manually with: git fetch %s %s && git reset --hard %s/%s\n%s", remote, branch, remote, branch, summary)
+		return
+	}
+	if !clean {
+		logger.Warningf("--reset proceeding with uncommitted changes (--allow-dirty); these will be discarded:\n%s", summary)
+	}
+
+	refspec := fmt.Sprintf("+refs/heads/%s:refs/remotes/%s/%s", branch, remote, branch)
+	if err := repo.FetchFrom(remote, refspec); err != nil {
+		logger.Warningf("Skipping --reset: %s", err)
+		return
+	}
+
+	target := fmt.Sprintf("%s/%s", remote, branch)
+	if err := repo.ResetHard(target); err != nil {
+		logger.Warningf("--reset: %s", err)
+		return
+	}
+
+	logger.Noticef("Local %s reset to %s", branch, target)
 }

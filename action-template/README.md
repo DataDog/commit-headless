@@ -27,6 +27,8 @@ For source code and CLI documentation, see the [main branch](https://github.com/
 | `force` | Force-update the branch ref (requires `head-sha`) | No | `false` |
 | `sign-attempts` | Max attempts to create each commit with a valid signature (0 to skip) | No | `5` |
 | `dry-run` | Skip actual remote writes | No | `false` |
+| `reset` | After a successful `push`, fast-forward the local branch to the remote via `git reset --hard` | No | `false` |
+| `allow-dirty` | With `reset`, proceed even if the working tree has uncommitted changes (they will be discarded) | No | `false` |
 | `message` | Commit message (for `commit` command) | No | |
 | `author` | Commit author (for `commit` command) | No | github-actions bot |
 | `since` | Base commit to replay from (for `replay` command) | No | |
@@ -60,6 +62,37 @@ Push local commits to the remote as signed commits.
     branch: ${{ github.ref_name }}
     command: push
 ```
+
+### Syncing the local checkout with `reset`
+
+After a push, the local commits and the remote commits diverge in SHA (because the remote commits
+are re-signed). For long-running jobs that continue working with the local checkout after a push
+(e.g., creating a release tag, running follow-up commits), pass `reset: true` to fast-forward the
+local branch to the remote:
+
+```yaml
+- name: Push commits
+  id: push
+  uses: DataDog/commit-headless@action/v%%VERSION%%
+  with:
+    branch: ${{ github.ref_name }}
+    command: push
+    reset: true
+
+- name: Tag the pushed commit
+  env:
+    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  run: |
+    gh api -X POST "repos/${{ github.repository }}/git/refs" \
+      -f "ref=refs/tags/v1.0.0" \
+      -f "sha=${{ steps.push.outputs.pushed_ref }}"
+```
+
+The reset is skipped (with a warning, not a failure — the push has already succeeded) if `HEAD` is
+detached or on a different branch, the working tree has uncommitted changes (use `allow-dirty` to
+discard them), or no git remote points at `target`.
+
+Local tags are not pushed or synchronized; `reset` only updates the branch ref and working tree.
 
 ### Creating a new branch
 

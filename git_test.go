@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"maps"
 	"os"
 	"os/exec"
@@ -37,6 +38,23 @@ type testRepository struct {
 
 func (tr *testRepository) init() {
 	tr.root = tr.t.TempDir()
+
+	// Isolate from host git config. CI runners commonly inject a
+	// url.<token-prefixed-mirror>.insteadOf rewrite of github.com URLs via
+	// `git config --global`, which would otherwise leak into tests that
+	// operate on remote URLs.
+	//
+	// HOME is overridden because git versions older than 2.32 don't honor
+	// GIT_CONFIG_GLOBAL and fall back to $HOME/.gitconfig — pointing HOME at
+	// the empty test tempdir suppresses the global config regardless of git
+	// version. GIT_CONFIG_GLOBAL/SYSTEM cover the modern path. These env vars
+	// propagate to all git subprocesses (including those inside production
+	// code under test) since neither tr.git nor production helpers override
+	// cmd.Env.
+	tr.t.Setenv("HOME", tr.root)
+	tr.t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	tr.t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+
 	tr.git("init")
 	tr.git("config", "user.name", "A U Thor")
 	tr.git("config", "user.email", "author@home.arpa")
@@ -48,6 +66,30 @@ func (tr *testRepository) git(args ...string) []byte {
 	out, err := cmd.Output()
 	requireNoError(tr.t, err)
 	return out
+}
+
+// diagnoseConfigIsolation returns a string describing whether our test-level
+// git config isolation took effect. Used in test failure messages so a CI
+// failure tells us whether t.Setenv didn't propagate (env vars empty) or git
+// read config from somewhere our env vars don't cover (config sources show
+// unexpected paths).
+func (tr *testRepository) diagnoseConfigIsolation() string {
+	envSnapshot := fmt.Sprintf(
+		"  GIT_CONFIG_GLOBAL=%q\n  GIT_CONFIG_SYSTEM=%q\n  HOME=%q\n  XDG_CONFIG_HOME=%q",
+		os.Getenv("GIT_CONFIG_GLOBAL"),
+		os.Getenv("GIT_CONFIG_SYSTEM"),
+		os.Getenv("HOME"),
+		os.Getenv("XDG_CONFIG_HOME"),
+	)
+	cmd := exec.Command("git", "config", "--show-origin", "--list")
+	cmd.Dir = tr.root
+	out, err := cmd.Output()
+	configSources := strings.TrimSpace(string(out))
+	if err != nil {
+		configSources = fmt.Sprintf("(error running git config --show-origin: %s)", err)
+	}
+	return fmt.Sprintf("env from test process:\n%s\nconfig sources git is reading:\n%s",
+		envSnapshot, configSources)
 }
 
 func (tr *testRepository) path(p ...string) string {
@@ -341,6 +383,223 @@ func TestStagedChanges(t *testing.T) {
 		// Cleanup - restore file
 		tr.git("reset", "HEAD", "existing.txt")
 		tr.git("checkout", "existing.txt")
+	})
+}
+
+func TestIsClean(t *testing.T) {
+	tr := testRepo(t)
+	requireNoError(t, os.WriteFile(tr.path("tracked"), []byte("a"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "initial")
+
+	r := &Repository{path: tr.root}
+
+	t.Run("clean", func(t *testing.T) {
+		clean, summary, err := r.IsClean()
+		requireNoError(t, err)
+		if !clean {
+			t.Errorf("expected clean, got dirty: %q", summary)
+		}
+	})
+
+	t.Run("untracked is clean", func(t *testing.T) {
+		requireNoError(t, os.WriteFile(tr.path("untracked"), []byte("u"), 0o644))
+		defer os.Remove(tr.path("untracked"))
+
+		clean, summary, err := r.IsClean()
+		requireNoError(t, err)
+		if !clean {
+			t.Errorf("expected clean (untracked-only), got dirty: %q", summary)
+		}
+	})
+
+	t.Run("unstaged modification is dirty", func(t *testing.T) {
+		requireNoError(t, os.WriteFile(tr.path("tracked"), []byte("b"), 0o644))
+		defer func() {
+			tr.git("checkout", "HEAD", "--", "tracked")
+		}()
+
+		clean, summary, err := r.IsClean()
+		requireNoError(t, err)
+		if clean {
+			t.Errorf("expected dirty, got clean")
+		}
+		if !strings.Contains(summary, "tracked") {
+			t.Errorf("summary should mention tracked, got: %q", summary)
+		}
+	})
+
+	t.Run("staged addition is dirty", func(t *testing.T) {
+		requireNoError(t, os.WriteFile(tr.path("staged"), []byte("s"), 0o644))
+		tr.git("add", "staged")
+		defer func() {
+			tr.git("reset", "HEAD", "staged")
+			os.Remove(tr.path("staged"))
+		}()
+
+		clean, _, err := r.IsClean()
+		requireNoError(t, err)
+		if clean {
+			t.Errorf("expected dirty, got clean")
+		}
+	})
+}
+
+func TestCurrentBranch(t *testing.T) {
+	tr := testRepo(t)
+	tr.git("checkout", "-b", "feature")
+	requireNoError(t, os.WriteFile(tr.path("file"), []byte("x"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "first")
+
+	r := &Repository{path: tr.root}
+
+	t.Run("on branch", func(t *testing.T) {
+		b, err := r.CurrentBranch()
+		requireNoError(t, err)
+		if b != "feature" {
+			t.Errorf("expected feature, got %q", b)
+		}
+	})
+
+	t.Run("detached HEAD", func(t *testing.T) {
+		head := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+		tr.git("checkout", "--detach", head)
+		defer tr.git("checkout", "feature")
+
+		b, err := r.CurrentBranch()
+		requireNoError(t, err)
+		if b != "" {
+			t.Errorf("expected empty (detached), got %q", b)
+		}
+	})
+}
+
+func TestResetHard(t *testing.T) {
+	tr := testRepo(t)
+	requireNoError(t, os.WriteFile(tr.path("file"), []byte("v1"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "v1")
+	first := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+	requireNoError(t, os.WriteFile(tr.path("file"), []byte("v2"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "v2")
+
+	r := &Repository{path: tr.root}
+
+	t.Run("happy path", func(t *testing.T) {
+		err := r.ResetHard(first)
+		requireNoError(t, err)
+		head := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+		if head != first {
+			t.Errorf("expected HEAD %s, got %s", first, head)
+		}
+		content, err := os.ReadFile(tr.path("file"))
+		requireNoError(t, err)
+		if string(content) != "v1" {
+			t.Errorf("expected file to be v1, got %q", content)
+		}
+	})
+
+	t.Run("missing ref", func(t *testing.T) {
+		err := r.ResetHard("nonexistent-ref-xyz")
+		if err == nil {
+			t.Error("expected error for unknown ref")
+		}
+	})
+}
+
+func TestRemoteForTarget(t *testing.T) {
+	t.Run("matching", func(t *testing.T) {
+		cases := []struct {
+			url    string
+			target string
+			match  bool
+		}{
+			{"https://github.com/DataDog/repo.git", "github.com/datadog/repo", true},
+			{"https://github.com/DataDog/repo", "github.com/datadog/repo", true},
+			{"git@github.com:DataDog/repo.git", "github.com/datadog/repo", true},
+			{"git@github.com:DataDog/repo", "github.com/datadog/repo", true},
+			{"git://github.com/DataDog/repo.git", "github.com/datadog/repo", true},
+			{"https://github.com/DataDog/other.git", "github.com/datadog/repo", false},
+			{"https://gitlab.com/DataDog/repo.git", "github.com/datadog/repo", false},
+			{"https://example.com/github.com/datadog/other.git", "github.com/datadog/repo", false},
+		}
+		for _, tc := range cases {
+			t.Run(tc.url, func(t *testing.T) {
+				got := remoteURLMatchesTarget(tc.url, tc.target)
+				if got != tc.match {
+					t.Errorf("remoteURLMatchesTarget(%q, %q) = %v, want %v", tc.url, tc.target, got, tc.match)
+				}
+			})
+		}
+	})
+
+	t.Run("single match", func(t *testing.T) {
+		tr := testRepo(t)
+		tr.git("remote", "add", "origin", "https://github.com/DataDog/example.git")
+
+		r := &Repository{path: tr.root}
+		name, err := r.RemoteForTarget("DataDog", "example")
+		if err != nil {
+			t.Fatalf("expected to find origin, got: %s\n%s", err, tr.diagnoseConfigIsolation())
+		}
+		if name != "origin" {
+			t.Errorf("expected origin, got %q", name)
+		}
+	})
+
+	t.Run("case insensitive", func(t *testing.T) {
+		tr := testRepo(t)
+		tr.git("remote", "add", "origin", "https://github.com/DataDog/Example.git")
+
+		r := &Repository{path: tr.root}
+		name, err := r.RemoteForTarget("datadog", "example")
+		if err != nil {
+			t.Fatalf("expected to find origin, got: %s\n%s", err, tr.diagnoseConfigIsolation())
+		}
+		if name != "origin" {
+			t.Errorf("expected origin, got %q", name)
+		}
+	})
+
+	t.Run("ssh url", func(t *testing.T) {
+		tr := testRepo(t)
+		tr.git("remote", "add", "upstream", "git@github.com:DataDog/example.git")
+
+		r := &Repository{path: tr.root}
+		name, err := r.RemoteForTarget("DataDog", "example")
+		requireNoError(t, err)
+		if name != "upstream" {
+			t.Errorf("expected upstream, got %q", name)
+		}
+	})
+
+	t.Run("no match", func(t *testing.T) {
+		tr := testRepo(t)
+		tr.git("remote", "add", "origin", "https://github.com/DataDog/other.git")
+
+		r := &Repository{path: tr.root}
+		_, err := r.RemoteForTarget("DataDog", "example")
+		if err == nil {
+			t.Error("expected error when no remote matches")
+		}
+	})
+
+	t.Run("multiple matches", func(t *testing.T) {
+		tr := testRepo(t)
+		tr.git("remote", "add", "origin", "https://github.com/DataDog/example.git")
+		tr.git("remote", "add", "fork", "git@github.com:DataDog/example.git")
+
+		r := &Repository{path: tr.root}
+		_, err := r.RemoteForTarget("DataDog", "example")
+		if err == nil {
+			t.Fatalf("expected error when multiple remotes match\n%s", tr.diagnoseConfigIsolation())
+		}
+		if !strings.Contains(err.Error(), "multiple") {
+			t.Errorf("expected 'multiple' in error, got: %v", err)
+		}
 	})
 }
 
