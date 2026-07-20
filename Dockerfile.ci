@@ -11,7 +11,9 @@ COPY --from=registry.ddbuild.io/dd-octo-sts:v1.8.2@sha256:4030e6e77a531dcbcbbd20
 RUN clean-apt install \
     git=1:2.34.1-1ubuntu1.12
 
-ENV GO_VERSION="1.24.0"
+# Keep in sync with the `toolchain` directive in go.mod. Building with an older
+# Go stamps the released binary's stdlib with known CVEs (GO-2026-4337, etc.).
+ENV GO_VERSION="1.26.1"
 RUN  curl -sSL https://binaries.ddbuild.io/golang/go${GO_VERSION}.linux-amd64.tar.gz -o /tmp/go.tar.gz \
     && tar -xzvf /tmp/go.tar.gz -C /usr/local/bin go
 
