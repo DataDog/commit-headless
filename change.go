@@ -5,10 +5,18 @@ import (
 	"strings"
 )
 
+// modeSubmodule is the git tree mode for a submodule (gitlink) entry.
+const modeSubmodule = "160000"
+
 // FileEntry represents a file in a change with its content and mode.
 type FileEntry struct {
 	Content []byte // nil indicates deletion, empty slice indicates empty file
-	Mode    string // git file mode (e.g., "100644", "100755")
+	Mode    string // git file mode (e.g., "100644", "100755", "160000")
+}
+
+// IsSubmodule reports whether this entry is a submodule (gitlink) rather than a regular file.
+func (fe FileEntry) IsSubmodule() bool {
+	return fe.Mode == modeSubmodule
 }
 
 // Change represents a single change that will be pushed to the remote.
@@ -30,6 +38,16 @@ type Change struct {
 func (c Change) HasNonDefaultModes() bool {
 	for _, fe := range c.entries {
 		if fe.Mode != "" && fe.Mode != "100644" {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSubmodules returns true if any file entry is a submodule (gitlink).
+func (c Change) HasSubmodules() bool {
+	for _, fe := range c.entries {
+		if fe.IsSubmodule() {
 			return true
 		}
 	}

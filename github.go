@@ -184,6 +184,11 @@ func (s commitStrategy) String() string {
 
 // chooseStrategy decides whether to use GraphQL or REST for a given change.
 func (c *Client) chooseStrategy(change Change) commitStrategy {
+	// GraphQL's createCommitOnBranch has no concept of gitlinks: it can only add
+	// or delete files. REST is the only strategy that can write a submodule entry.
+	if change.HasSubmodules() {
+		return strategyREST
+	}
 	if change.HasNonDefaultModes() && !c.userToken {
 		return strategyREST
 	}
@@ -384,14 +389,24 @@ func (c *Client) prepTree(ctx context.Context, headCommit string, change Change)
 			mode = "100644"
 		}
 
-		entry := &github.TreeEntry{
-			Path: github.Ptr(path),
-			Mode: github.Ptr(mode),
-			Type: github.Ptr("blob"),
-		}
-		if fe.Content == nil {
+		switch {
+		case fe.Content == nil:
 			// Deletion: SHA must be empty string for go-github to omit it
-		} else {
+			entries = append(entries, &github.TreeEntry{
+				Path: github.Ptr(path),
+				Mode: github.Ptr(mode),
+				Type: github.Ptr("blob"),
+			})
+		case fe.IsSubmodule():
+			// Submodule: the tree entry references a commit in the submodule's
+			// own history directly. There is no blob to create.
+			entries = append(entries, &github.TreeEntry{
+				Path: github.Ptr(path),
+				Mode: github.Ptr(mode),
+				Type: github.Ptr("commit"),
+				SHA:  github.Ptr(string(fe.Content)),
+			})
+		default:
 			blob, _, err := c.git.CreateBlob(ctx, c.owner, c.repo, github.Blob{
 				Content:  github.Ptr(base64.StdEncoding.EncodeToString(fe.Content)),
 				Encoding: github.Ptr("base64"),
@@ -399,9 +414,13 @@ func (c *Client) prepTree(ctx context.Context, headCommit string, change Change)
 			if err != nil {
 				return "", fmt.Errorf("create blob for %s: %w", path, err)
 			}
-			entry.SHA = blob.SHA
+			entries = append(entries, &github.TreeEntry{
+				Path: github.Ptr(path),
+				Mode: github.Ptr(mode),
+				Type: github.Ptr("blob"),
+				SHA:  blob.SHA,
+			})
 		}
-		entries = append(entries, entry)
 	}
 
 	tree, _, err := c.git.CreateTree(ctx, c.owner, c.repo, baseTreeSHA, entries)

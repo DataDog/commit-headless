@@ -389,7 +389,19 @@ func (r *Repository) fileContentAndMode(commit, path string) ([]byte, string, er
 	}
 
 	// Output format: mode SP type SP hash TAB path
-	mode := strings.SplitN(string(out), " ", 2)[0]
+	fields := strings.SplitN(string(out), " ", 3)
+	if len(fields) < 3 {
+		return nil, "", fmt.Errorf("ls-tree: unexpected output %q", out)
+	}
+	mode := fields[0]
+	hash := strings.SplitN(fields[2], "\t", 2)[0]
+
+	if mode == modeSubmodule {
+		// Submodules are gitlinks: the tree entry's hash is a commit in the
+		// submodule's own history, not an object in this repository, so
+		// there is no blob content to read via cat-file.
+		return []byte(hash), mode, nil
+	}
 
 	// Get the file content
 	cmd = exec.Command("git", "cat-file", "blob", fmt.Sprintf("%s:%s", commit, path))
@@ -457,7 +469,18 @@ func (r *Repository) stagedContentAndMode(path string) ([]byte, string, error) {
 		return nil, "", fmt.Errorf("ls-files: %w", err)
 	}
 
-	mode := strings.SplitN(string(out), " ", 2)[0]
+	fields := strings.Fields(string(out))
+	if len(fields) < 2 {
+		return nil, "", fmt.Errorf("ls-files: unexpected output %q", out)
+	}
+	mode, hash := fields[0], fields[1]
+
+	if mode == modeSubmodule {
+		// Submodules are gitlinks: the indexed hash is a commit in the
+		// submodule's own history, not an object in this repository, so
+		// there is no blob content to read via cat-file.
+		return []byte(hash), mode, nil
+	}
 
 	// Get content from the index
 	cmd = exec.Command("git", "cat-file", "blob", ":"+path)
