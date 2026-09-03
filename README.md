@@ -57,7 +57,7 @@ Push local commits to the remote as signed commits.
     git add bot.txt && git commit -m "bot commit 2"
 
 - name: Push commits
-  uses: DataDog/commit-headless@action/v3.3.1
+  uses: DataDog/commit-headless@action/v3.4.0
   with:
     branch: ${{ github.ref_name }}
     command: push
@@ -73,7 +73,7 @@ local branch to the remote:
 ```yaml
 - name: Push commits
   id: push
-  uses: DataDog/commit-headless@action/v3.3.1
+  uses: DataDog/commit-headless@action/v3.4.0
   with:
     branch: ${{ github.ref_name }}
     command: push
@@ -108,7 +108,7 @@ Use `create-branch` with `head-sha` to create the branch if it doesn't exist:
     git add last-build.txt && git commit -m "update build timestamp"
 
 - name: Push commits
-  uses: DataDog/commit-headless@action/v3.3.1
+  uses: DataDog/commit-headless@action/v3.4.0
   with:
     branch: build-timestamp
     head-sha: ${{ github.sha }}
@@ -132,7 +132,7 @@ between local and remote history.
     git rm -f old-file.txt || true
 
 - name: Create commit
-  uses: DataDog/commit-headless@action/v3.3.1
+  uses: DataDog/commit-headless@action/v3.4.0
   with:
     branch: ${{ github.ref_name }}
     author: "A U Thor <author@example.com>"
@@ -149,7 +149,7 @@ Apply the same staged changes to multiple repositories:
   run: git add config.yml security-policy.md
 
 - name: Update repo1
-  uses: DataDog/commit-headless@action/v3.3.1
+  uses: DataDog/commit-headless@action/v3.4.0
   with:
     target: org/repo1
     branch: main
@@ -157,7 +157,7 @@ Apply the same staged changes to multiple repositories:
     command: commit
 
 - name: Update repo2
-  uses: DataDog/commit-headless@action/v3.3.1
+  uses: DataDog/commit-headless@action/v3.4.0
   with:
     target: org/repo2
     branch: main
@@ -174,7 +174,7 @@ Re-sign existing remote commits. Useful when an earlier step creates unsigned co
   uses: some-org/some-action@v1
 
 - name: Replay commits as signed
-  uses: DataDog/commit-headless@action/v3.3.1
+  uses: DataDog/commit-headless@action/v3.4.0
   with:
     branch: ${{ github.ref_name }}
     since: ${{ github.sha }}
