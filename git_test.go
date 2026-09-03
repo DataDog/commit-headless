@@ -651,3 +651,70 @@ func TestChangedFiles(t *testing.T) {
 		t.Fail()
 	}
 }
+
+func TestChangedFilesSubmodule(t *testing.T) {
+	sub := testRepo(t)
+	requireNoError(t, os.WriteFile(sub.path("file"), []byte("content"), 0o644))
+	sub.git("add", "-A")
+	sub.git("commit", "--message", "submodule initial commit")
+	subHash := strings.TrimSpace(string(sub.git("rev-parse", "HEAD")))
+
+	tr := testRepo(t)
+	requireNoError(t, os.WriteFile(tr.path("file"), []byte("content"), 0o644))
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "initial commit")
+
+	tr.git("-c", "protocol.file.allow=always", "submodule", "add", sub.root, "submodules/sub")
+	tr.git("commit", "--message", "add submodule")
+
+	runIn := func(dir string, args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"HOME="+tr.root,
+			"GIT_CONFIG_GLOBAL="+os.DevNull,
+			"GIT_CONFIG_SYSTEM="+os.DevNull,
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	subCheckout := tr.path("submodules/sub")
+	runIn(subCheckout, "config", "user.name", "A U Thor")
+	runIn(subCheckout, "config", "user.email", "author@home.arpa")
+
+	// Bump the pinned commit to simulate an SDK pin update.
+	requireNoError(t, os.WriteFile(sub.path("file"), []byte("more content"), 0o644))
+	sub.git("commit", "-a", "--message", "submodule second commit")
+	newSubHash := strings.TrimSpace(string(sub.git("rev-parse", "HEAD")))
+
+	runIn(subCheckout, "fetch")
+	runIn(subCheckout, "checkout", newSubHash)
+
+	tr.git("add", "-A")
+	tr.git("commit", "--message", "bump submodule pin")
+	hash := strings.TrimSpace(string(tr.git("rev-parse", "HEAD")))
+
+	r := &Repository{path: tr.root}
+
+	changes, err := r.Changes(hash)
+	requireNoError(t, err, "expected the submodule pin bump to be readable without a cat-file error")
+
+	entry, ok := changes[0].entries["submodules/sub"]
+	if !ok {
+		t.Fatalf("expected an entry for submodules/sub, got %v", changes[0].entries)
+	}
+	if entry.Mode != modeSubmodule {
+		t.Fatalf("expected mode %q, got %q", modeSubmodule, entry.Mode)
+	}
+	if !entry.IsSubmodule() {
+		t.Fatal("expected IsSubmodule() to be true")
+	}
+	if string(entry.Content) != newSubHash {
+		t.Fatalf("expected content to be the submodule's new commit hash %q, got %q", newSubHash, entry.Content)
+	}
+
+	_ = subHash // establishes the initial pin; unused beyond documenting the setup
+}
