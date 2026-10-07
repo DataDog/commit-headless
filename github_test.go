@@ -550,17 +550,22 @@ func TestPushChanges(t *testing.T) {
 		for name, tc := range map[string]struct {
 			create   bool
 			expected string
+			tree     string
 			want     string // last ref write, or error substring
 		}{
 			"creates the branch only once commits exist": {create: true, want: "POST refs/heads/test-branch"},
 			"lease holds":  {expected: "remote-head", want: "PATCH heads/test-branch"},
 			"lease broken": {expected: "other", want: "stale info"},
+			"tree matches": {tree: "tree-sha", want: "PATCH heads/test-branch"},
+			"tree differs": {tree: "other", want: "branch left untouched"},
 		} {
 			t.Run(name, func(t *testing.T) {
 				var writes []string
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "application/json")
 					switch {
+					case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/commits/"):
+						json.NewEncoder(w).Encode(github.Commit{Tree: &github.Tree{SHA: github.Ptr("tree-sha")}})
 					case r.Method == http.MethodGet:
 						json.NewEncoder(w).Encode(github.Branch{Commit: &github.RepositoryCommit{SHA: github.Ptr("remote-head")}})
 					case r.Method == http.MethodPost:
@@ -578,7 +583,7 @@ func TestPushChanges(t *testing.T) {
 				}))
 				defer server.Close()
 				client := newTestClient(t, server)
-				client.createAtEnd, client.expectedHead, client.force = tc.create, tc.expected, tc.expected != ""
+				client.createAtEnd, client.expectedHead, client.force, client.expectedTree = tc.create, tc.expected, tc.expected != "", tc.tree
 				client.graphql = &mockGraphQL{handler: func(string, map[string]any) (json.RawMessage, error) {
 					return signedGraphQLResponse("new"), nil
 				}}

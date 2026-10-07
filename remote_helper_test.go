@@ -16,7 +16,7 @@ import (
 func TestMain(m *testing.M) {
 	if filepath.Base(os.Args[0]) == "git-remote-headless" {
 		bare := os.Args[2]
-		headlessPush = func(_ context.Context, _ string, _ targetFlag, branch, base string, _, _ bool, _ string, changes []Change) (string, error) {
+		headlessPush = func(_ context.Context, _ string, _ targetFlag, branch, base string, _, _ bool, _, _ string, changes []Change) (string, error) {
 			return fakeGitHubPush(bare, branch, base, changes)
 		}
 		credentialFor = func(string) (string, error) { return "ghu_test", nil }
@@ -207,6 +207,21 @@ func TestRemoteHelperBatchEdgeCases(t *testing.T) {
 		}
 	})
 
+	t.Run("stacked branches keep their shared history", func(t *testing.T) {
+		f := newHelperFixture(t)
+		f.git("checkout", "--quiet", "-b", "lower")
+		f.commit("one")
+		f.git("checkout", "--quiet", "-b", "upper")
+		f.commit("two")
+		if out, ok := f.push("origin", "lower", "upper"); !ok {
+			t.Fatalf("push failed:\n%s", out)
+		}
+		lower, upper := f.remoteRev("refs/heads/lower"), f.remoteRev("refs/heads/upper")
+		if f.rev("lower") != lower || f.rev("upper") != upper || f.rev("upper^") != lower {
+			t.Errorf("upper must sit on the signed lower (lower=%s upper^=%s)", lower, f.rev("upper^"))
+		}
+	})
+
 	t.Run("lease that the branch must not exist", func(t *testing.T) {
 		f := newHelperFixture(t)
 		f.git("checkout", "--quiet", "-b", "feature")
@@ -272,6 +287,11 @@ func TestRemoteHelperRefusesWhatTheAPICannotSign(t *testing.T) {
 			requireNoError(t, os.WriteFile(filepath.Join(f.root, "run.sh"), []byte("#!/bin/sh\n"), 0o755))
 			f.git("add", "run.sh")
 			f.git("commit", "--quiet", "-m", "script")
+		},
+		"type change": func(f *helperFixture) {
+			requireNoError(t, os.Remove(filepath.Join(f.root, "base")))
+			requireNoError(t, os.Symlink("elsewhere", filepath.Join(f.root, "base")))
+			f.git("commit", "--quiet", "-am", "file to symlink")
 		},
 		"mode change": func(f *helperFixture) {
 			f.git("update-index", "--chmod=+x", "base")
@@ -343,6 +363,12 @@ func TestRemoteHelperPassesThroughWhatNeedsNoSigning(t *testing.T) {
 	}
 	if f.remoteRev("refs/heads/signed") != signed || f.remoteRev("refs/tags/v1") == "" || f.remoteRev("refs/heads/copy") != "" {
 		t.Errorf("pass-through pushes did not land as expected")
+	}
+}
+
+func TestRedact(t *testing.T) {
+	if got := redact("https://me:ghp_secret@github.com/o/r"); strings.Contains(got, "secret") || got != "https://github.com/o/r" {
+		t.Errorf("redact leaked or mangled: %q", got)
 	}
 }
 

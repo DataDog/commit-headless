@@ -28,10 +28,10 @@ const remoteHelperDocs = "https://github.com/DataDog/commit-headless#git-remote-
 
 // headlessPush creates signed copies of changes on top of base and points branch at them,
 // returning the new head. It's a variable so tests can replace GitHub.
-var headlessPush = func(ctx context.Context, token string, target targetFlag, branch, base string, create, force bool, lease string, changes []Change) (string, error) {
+var headlessPush = func(ctx context.Context, token string, target targetFlag, branch, base string, create, force bool, lease, tree string, changes []Change) (string, error) {
 	client := NewClient(ctx, token, target.Owner(), target.Repository(), branch)
 	client.signAttempts = 5
-	client.createAtEnd, client.force, client.expectedHead = create, force, lease
+	client.createAtEnd, client.force, client.expectedHead, client.expectedTree = create, force, lease, tree
 	_, head, err := client.PushChanges(ctx, base, changes...)
 	return head, err
 }
@@ -51,7 +51,7 @@ type remoteHelper struct {
 	stderr     io.Writer
 	remoteRefs map[string]string
 	leases     map[string]string
-	signed     map[string]string // local commit -> its signed copy, pushed earlier in this batch
+	signed     map[string]string // local commit -> its signed copy, from earlier in this batch
 	dryRun     bool
 }
 
@@ -156,7 +156,7 @@ func (h *remoteHelper) option(opt string) string {
 func (h *remoteHelper) list() error {
 	out, err := h.git("ls-remote", h.url, "refs/heads/*", "refs/tags/*")
 	if err != nil {
-		return fmt.Errorf("%w; check `git ls-remote %s` works (credentials, network)", err, h.url)
+		return fmt.Errorf("%w; check `git ls-remote %s` works (credentials, network)", err, redact(h.url))
 	}
 	h.remoteRefs = map[string]string{}
 	for _, line := range strings.Split(out, "\n") {
@@ -213,14 +213,19 @@ func (h *remoteHelper) pushOne(spec pushSpec) (string, error) {
 	if local == "" {
 		return "", fmt.Errorf("%s is not a commit", spec.src)
 	}
-	if signed, ok := h.signed[local]; ok {
-		// The same commit went to another branch earlier in this push: reuse its signed copy.
-		spec.src = signed
-		return signed, h.nativePush(spec)
-	}
 	outgoing, err := h.outgoing(local)
 	if err != nil {
 		return "", err
+	}
+	// Commits signed for another branch earlier in this push (same or stacked branches) are
+	// reused, so the branches keep their shared history.
+	reused := ""
+	for len(outgoing) > 0 && h.signed[outgoing[0]] != "" {
+		reused, outgoing = h.signed[outgoing[0]], outgoing[1:]
+	}
+	if reused != "" && len(outgoing) == 0 {
+		spec.src = reused
+		return reused, h.nativePush(spec)
 	}
 	if signed, err := h.allSigned(outgoing); err != nil || signed {
 		if err != nil {
@@ -237,19 +242,33 @@ func (h *remoteHelper) pushOne(spec pushSpec) (string, error) {
 	if err != nil || h.dryRun {
 		return "", err
 	}
+	if reused != "" {
+		base = reused
+	}
+	tree, err := h.git("rev-parse", local+"^{tree}")
+	if err != nil {
+		return "", err
+	}
 	if !leased {
 		lease = ""
 	}
 	branch := strings.TrimPrefix(spec.dst, "refs/heads/")
-	newHead, err := headlessPush(context.Background(), token, h.target, branch, base, old == "", spec.force || leased, lease, changes)
+	newHead, err := headlessPush(context.Background(), token, h.target, branch, base, old == "", spec.force || leased, lease, tree, changes)
 	if err != nil {
 		return "", fmt.Errorf("GitHub API push failed, nothing changed locally: %w (see %s)", err, remoteHelperDocs)
 	}
+	if err := h.adoptSigned(spec, local, newHead, len(outgoing)); err != nil {
+		return "", err
+	}
+	// Map each rewritten commit to its signed copy for later refspecs in this push.
+	copies, _ := h.git("rev-list", "--reverse", "--first-parent", fmt.Sprintf("-n%d", len(outgoing)), newHead)
 	if h.signed == nil {
 		h.signed = map[string]string{}
 	}
-	h.signed[local] = newHead
-	return newHead, h.adoptSigned(spec, local, newHead, len(outgoing))
+	for i, c := range strings.Fields(copies) {
+		h.signed[outgoing[i]] = c
+	}
+	return newHead, nil
 }
 
 // outgoing lists the commits reachable from local but from no remote tip, oldest first.
@@ -375,12 +394,6 @@ func (h *remoteHelper) adoptSigned(spec pushSpec, local, newHead string, count i
 	if _, err := h.git("fetch", "--quiet", "--no-tags", h.url, spec.dst); err != nil {
 		return fmt.Errorf("pushed %s but could not fetch it (%w); run `git pull --rebase` to sync", newHead, err)
 	}
-	localTree, _ := h.git("rev-parse", local+"^{tree}")
-	signedTree, err := h.git("rev-parse", newHead+"^{tree}")
-	if err != nil || signedTree != localTree {
-		return fmt.Errorf("pushed %s but its files differ from local %.12s; compare with `git diff %.12s %.12s` and report it: %s", newHead, local, local, newHead, remoteHelperDocs)
-	}
-
 	ref, _ := h.git("rev-parse", "--symbolic-full-name", spec.src)
 	moved := "local commits left unchanged"
 	if !gitReportsNewOid() {
@@ -446,5 +459,14 @@ var credentialFor = func(remoteURL string) (string, error) {
 			return password, nil
 		}
 	}
-	return "", fmt.Errorf("no GitHub credentials for %s from `git credential fill`; configure a credential helper for https://github.com, see %s", remoteURL, remoteHelperDocs)
+	return "", fmt.Errorf("no GitHub credentials for %s from `git credential fill`; configure a credential helper for https://github.com, see %s", redact(remoteURL), remoteHelperDocs)
+}
+
+// redact drops any credentials embedded in a URL before it is printed.
+func redact(raw string) string {
+	if u, err := url.Parse(raw); err == nil && u.User != nil {
+		u.User = nil
+		return u.String()
+	}
+	return raw
 }

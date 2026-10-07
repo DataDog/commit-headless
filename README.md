@@ -194,8 +194,8 @@ the update would be overwritten, as with `commit-headless push --force`.
 With a user token, GitHub keeps a modified file's existing mode and creates new files as regular
 files. Pushes that would need anything else (new executables, symlinks or submodules, mode changes),
 merge commits, or a root commit are refused before anything is written, with a message suggesting a
-rebase or signing the commits locally (`git commit -S`). After a push, the signed tree is compared
-with the local one before the local branch is moved.
+rebase or signing the commits locally (`git commit -S`). The signed tree is compared with the local
+one before the remote branch is updated.
 
 Other local refs pointing at the old commits (stacked branches, tags) are not rewritten.
 

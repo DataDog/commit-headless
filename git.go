@@ -353,7 +353,7 @@ func (r *Repository) changedFiles(commit string) (map[string]FileEntry, error) {
 
 		status, value, _ := strings.Cut(ln, "\t")
 		switch {
-		case status == "A" || status == "M":
+		case status == "A" || status == "M" || status == "T": // T: type change, e.g. file to symlink
 			content, mode, err := r.fileContentAndMode(commit, value)
 			if err != nil {
 				return nil, fmt.Errorf("get content %s:%s: %w", commit, value, err)

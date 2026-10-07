@@ -111,6 +111,8 @@ type Client struct {
 	// expectedHead is re-checked right before a forced update (--force-with-lease). GitHub has
 	// no compare-and-swap for forced ref updates, so this narrows the race to one API call.
 	expectedHead string
+	// expectedTree, when set, must match the last commit's tree before the branch is touched.
+	expectedTree string
 }
 
 // NewClient returns a Client configured to make GitHub requests for branch owned by owner/repo on
@@ -258,6 +260,13 @@ func (c *Client) PushChanges(ctx context.Context, headCommit string, changes ...
 		headCommit = newHead
 	}
 
+	if c.expectedTree != "" {
+		commit, _, err := c.git.GetCommit(ctx, c.owner, c.repo, headCommit)
+		if err != nil || commit.GetTree().GetSHA() != c.expectedTree {
+			return len(changes), "", fmt.Errorf("signed commit %s has different files than the local commit (tree %s, want %s, err: %v); branch left untouched",
+				headCommit, commit.GetTree().GetSHA(), c.expectedTree, err)
+		}
+	}
 	if c.createAtEnd {
 		// Creating a ref fails if it already exists, which makes this atomic.
 		if _, _, err := c.git.CreateRef(ctx, c.owner, c.repo, github.CreateRef{Ref: "refs/heads/" + c.branch, SHA: headCommit}); err != nil {
