@@ -20,7 +20,7 @@ func TestMain(m *testing.M) {
 			return fakeGitHubPush(bare, branch, base, changes)
 		}
 		logger = NewLogger(io.Discard)
-		h := &remoteHelper{repo: &Repository{path: "."}, url: bare, target: "owner/repo", out: os.Stdout, stderr: os.Stderr}
+		h := &remoteHelper{repo: &Repository{path: "."}, remote: os.Args[1], url: bare, target: "owner/repo", out: os.Stdout, stderr: os.Stderr}
 		if err := h.serve(os.Stdin); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -153,6 +153,23 @@ func TestRemoteHelperRewritesUnsignedCommits(t *testing.T) {
 	}
 }
 
+func TestRemoteHelperOnlyRewritesCommitsMissingFromTheRemote(t *testing.T) {
+	f := newHelperFixture(t)
+	// Someone else moves main after our fetch: our origin/main is no longer a remote tip.
+	later := exec.Command("git", "--git-dir", f.bare, "commit-tree", "main^{tree}", "-p", "main", "-m", "later")
+	later.Env = append(os.Environ(), "GIT_AUTHOR_NAME=x", "GIT_AUTHOR_EMAIL=x@x", "GIT_COMMITTER_NAME=x", "GIT_COMMITTER_EMAIL=x@x")
+	sha, err := later.Output()
+	requireNoError(t, err)
+	requireNoError(t, exec.Command("git", "--git-dir", f.bare, "update-ref", "refs/heads/main", strings.TrimSpace(string(sha))).Run())
+
+	f.git("checkout", "--quiet", "-b", "feature")
+	f.commit("mine")
+	out, ok := f.push("origin", "feature")
+	if !ok || !strings.Contains(out, "signed 1 commit(s)") {
+		t.Fatalf("only the local commit should be rewritten:\n%s", out)
+	}
+}
+
 func TestRemoteHelperForceWithLease(t *testing.T) {
 	f := newHelperFixture(t)
 	f.git("checkout", "--quiet", "-b", "feature")
@@ -203,6 +220,24 @@ func TestRemoteHelperRefusesWhatTheAPICannotSign(t *testing.T) {
 				t.Errorf("a rejected push must change nothing")
 			}
 		})
+	}
+}
+
+func TestRemoteHelperAllowsEditingAnExecutable(t *testing.T) {
+	f := newHelperFixture(t)
+	f.git("checkout", "--quiet", "-b", "feature")
+	requireNoError(t, os.WriteFile(filepath.Join(f.root, "run.sh"), []byte("#!/bin/sh\n"), 0o755))
+	f.git("add", "run.sh")
+	f.git("commit", "--quiet", "-m", "script")
+	// Publish the script without the helper, as if it had been signed elsewhere.
+	requireNoError(t, exec.Command("git", "--git-dir", f.bare, "fetch", "--quiet", f.root, "feature:feature").Run())
+	f.git("fetch", "--quiet", "origin")
+
+	// GitHub keeps the mode of a file whose content changes (verified live).
+	requireNoError(t, os.WriteFile(filepath.Join(f.root, "run.sh"), []byte("#!/bin/sh\necho hi\n"), 0o755))
+	f.git("commit", "--quiet", "-am", "edit script")
+	if out, ok := f.push("origin", "feature"); !ok || !strings.Contains(out, "signed 1 commit(s)") {
+		t.Fatalf("editing an executable should be signed:\n%s", out)
 	}
 }
 

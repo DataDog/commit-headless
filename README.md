@@ -188,9 +188,11 @@ regular git. `--force`, `--force-with-lease`, `--dry-run` and `-u` work as usual
 The token comes from `HEADLESS_TOKEN`, or else from the git credential helper configured for the
 repository, so pushes use the same identity as fetches.
 
-The GitHub API cannot recreate merge commits, or files that aren't regular files (executables,
-symlinks, submodules) with a user token. Such pushes are rejected before anything is written, with
-a message suggesting a rebase or signing the commits locally (`git commit -S` with a key).
+With a user token, the GitHub API cannot recreate merge commits, nor create executables, symlinks
+or submodules, nor change a file's mode (editing an existing executable is fine). Such pushes are
+rejected before anything is written, with a message suggesting a rebase or signing the commits
+locally (`git commit -S` with a key). After a push, the helper checks the signed tree matches the
+local one before moving the local branch.
 
 Other local refs pointing at the old commits (stacked branches, tags) are not rewritten.
 

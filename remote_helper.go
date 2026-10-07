@@ -52,6 +52,7 @@ type pushSpec struct {
 
 type remoteHelper struct {
 	repo       *Repository
+	remote     string // remote name, or the URL itself for `git push <url>`
 	url        string
 	target     targetFlag
 	out        io.Writer
@@ -73,7 +74,7 @@ func remoteHelperMain(args []string) int {
 		return 1
 	}
 	logger = NewLogger(io.Discard)
-	h := &remoteHelper{repo: &Repository{path: "."}, url: args[1], target: target, out: os.Stdout, stderr: os.Stderr}
+	h := &remoteHelper{repo: &Repository{path: "."}, remote: args[0], url: args[1], target: target, out: os.Stdout, stderr: os.Stderr}
 	if err := h.serve(os.Stdin); err != nil {
 		fmt.Fprintf(os.Stderr, "headless: %s\n", err)
 		return 1
@@ -161,8 +162,12 @@ func (h *remoteHelper) list() error {
 	h.remoteRefs = map[string]string{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		sha, ref, ok := strings.Cut(line, "\t")
-		if ok && !strings.HasSuffix(ref, "^{}") {
-			h.remoteRefs[ref] = sha
+		if !ok {
+			continue
+		}
+		// Peeled annotated tags (refs/tags/v1^{}) only serve to exclude known commits.
+		h.remoteRefs[ref] = sha
+		if !strings.HasSuffix(ref, "^{}") {
 			fmt.Fprintf(h.out, "%s %s\n", sha, ref)
 		}
 	}
@@ -229,16 +234,29 @@ func (h *remoteHelper) pushOne(spec pushSpec) (string, error) {
 
 // outgoing lists the commits reachable from local but from no remote ref, oldest first.
 func (h *remoteHelper) outgoing(local string) ([]string, error) {
-	known := &strings.Builder{}
+	shas := &strings.Builder{}
 	for _, sha := range h.remoteRefs {
-		// Remote commits we never fetched can't be in local history; rev-list rejects them.
-		if _, err := h.git("cat-file", "-e", sha+"^{commit}"); err == nil {
+		fmt.Fprintln(shas, sha)
+	}
+	// Remote tips we haven't fetched are skipped below, so also count what we did fetch, or
+	// commits the remote already has would be recreated.
+	tracking, _ := h.git("for-each-ref", "--format=%(objectname)", "refs/remotes/"+h.remote+"/")
+	fmt.Fprintln(shas, tracking)
+	// Remote commits we never fetched can't be in local history, and rev-list rejects them.
+	check := exec.Command("git", "cat-file", "--batch-check=%(objectname) %(objecttype)")
+	check.Dir, check.Stdin = h.repo.path, strings.NewReader(shas.String())
+	present, err := check.Output()
+	if err != nil {
+		return nil, fmt.Errorf("cat-file: %w", err)
+	}
+	known := &strings.Builder{}
+	for _, line := range strings.Split(string(present), "\n") {
+		if sha, ok := strings.CutSuffix(line, " commit"); ok {
 			fmt.Fprintf(known, "^%s\n", sha)
 		}
 	}
 	cmd := exec.Command("git", "rev-list", "--reverse", "--stdin", local)
-	cmd.Dir = h.repo.path
-	cmd.Stdin = strings.NewReader(known.String())
+	cmd.Dir, cmd.Stdin = h.repo.path, strings.NewReader(known.String())
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("rev-list: %w", err)
@@ -284,8 +302,13 @@ func (h *remoteHelper) headlessChanges(outgoing []string) (string, []Change, err
 	}
 	for _, change := range changes {
 		for path, fe := range change.entries {
-			if fe.Content != nil && fe.Mode != "100644" {
-				return "", nil, fmt.Errorf("%.12s changes %s (mode %s); GitHub's API only signs regular files, %s", change.hash, path, fe.Mode, signLocally)
+			if fe.Content == nil || fe.Mode == "100644" {
+				continue
+			}
+			// Editing a file keeps its mode on GitHub; only creating or changing a mode is lost.
+			before, _ := h.git("ls-tree", change.hash+"^", "--", path)
+			if fe.IsSubmodule() || !strings.HasPrefix(before, fe.Mode+" ") {
+				return "", nil, fmt.Errorf("%.12s sets %s to mode %s; GitHub's API only creates regular files, %s", change.hash, path, fe.Mode, signLocally)
 			}
 		}
 	}
