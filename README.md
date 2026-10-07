@@ -185,14 +185,17 @@ The remote-tracking ref (`origin/feature`) records the signed commit, so `git st
 Already-signed commits, deletions, tags and branch moves that create no commits are pushed with
 regular git. `--force`, `--force-with-lease`, `--dry-run` and `-u` work as usual.
 
-The token comes from `HEADLESS_TOKEN`, or else from the git credential helper configured for the
-repository, so pushes use the same identity as fetches.
+The token comes from the git credential helper configured for the repository, so pushes use the
+same identity as fetches. A new branch is created only once its signed commits exist.
+`--force-with-lease` is re-checked right before the forced update; GitHub offers no atomic
+compare-and-swap for forced updates, so a concurrent push landing in between that last check and
+the update would be overwritten, as with `commit-headless push --force`.
 
-With a user token, the GitHub API cannot recreate merge commits, nor create executables, symlinks
-or submodules, nor change a file's mode (editing an existing executable is fine). Such pushes are
-rejected before anything is written, with a message suggesting a rebase or signing the commits
-locally (`git commit -S` with a key). After a push, the helper checks the signed tree matches the
-local one before moving the local branch.
+With a user token, GitHub keeps a modified file's existing mode and creates new files as regular
+files. Pushes that would need anything else (new executables, symlinks or submodules, mode changes),
+merge commits, or a root commit are refused before anything is written, with a message suggesting a
+rebase or signing the commits locally (`git commit -S`). After a push, the signed tree is compared
+with the local one before the local branch is moved.
 
 Other local refs pointing at the old commits (stacked branches, tags) are not rewritten.
 

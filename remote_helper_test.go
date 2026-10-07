@@ -16,7 +16,7 @@ import (
 func TestMain(m *testing.M) {
 	if filepath.Base(os.Args[0]) == "git-remote-headless" {
 		bare := os.Args[2]
-		headlessPush = func(_ context.Context, _ targetFlag, branch, base string, _, _ bool, changes []Change) (string, error) {
+		headlessPush = func(_ context.Context, _ string, _ targetFlag, branch, base string, _, _ bool, _ string, changes []Change) (string, error) {
 			return fakeGitHubPush(bare, branch, base, changes)
 		}
 		logger = NewLogger(io.Discard)
@@ -77,6 +77,7 @@ func newHelperFixture(t *testing.T) *helperFixture {
 	f.git("push", "--quiet", "origin", "main") // seed before enabling the helper
 	f.git("fetch", "--quiet", "origin")
 	f.git("config", "url.headless::"+f.bare+".pushInsteadOf", f.bare)
+	f.git("config", "credential.helper", "!f() { echo username=x; echo password=ghu_test; }; f")
 	return f
 }
 
@@ -170,6 +171,23 @@ func TestRemoteHelperOnlyRewritesCommitsMissingFromTheRemote(t *testing.T) {
 	}
 }
 
+func TestRemoteHelperIgnoresStaleTrackingRefs(t *testing.T) {
+	f := newHelperFixture(t)
+	f.git("checkout", "--quiet", "-b", "feature")
+	f.commit("one")
+	if out, ok := f.push("-u", "origin", "feature"); !ok {
+		t.Fatalf("push failed:\n%s", out)
+	}
+	// Someone force-pushes feature back to main; our origin/feature still points at "one".
+	requireNoError(t, exec.Command("git", "--git-dir", f.bare, "update-ref", "refs/heads/feature", "refs/heads/main").Run())
+	f.commit("two")
+
+	out, ok := f.push("--force", "origin", "feature")
+	if !ok || !strings.Contains(out, "signed 2 commit(s)") {
+		t.Fatalf("both commits missing from the remote must be signed:\n%s", out)
+	}
+}
+
 func TestRemoteHelperForceWithLease(t *testing.T) {
 	f := newHelperFixture(t)
 	f.git("checkout", "--quiet", "-b", "feature")
@@ -200,10 +218,19 @@ func TestRemoteHelperRefusesWhatTheAPICannotSign(t *testing.T) {
 			f.commit("main-line")
 			f.git("merge", "--quiet", "--no-edit", "side")
 		},
-		"executable": func(f *helperFixture) {
+		"new executable": func(f *helperFixture) {
 			requireNoError(t, os.WriteFile(filepath.Join(f.root, "run.sh"), []byte("#!/bin/sh\n"), 0o755))
 			f.git("add", "run.sh")
 			f.git("commit", "--quiet", "-m", "script")
+		},
+		"mode change": func(f *helperFixture) {
+			f.git("update-index", "--chmod=+x", "base")
+			f.git("commit", "--quiet", "-m", "make base executable")
+		},
+		"root commit": func(f *helperFixture) {
+			f.git("checkout", "--quiet", "--orphan", "fresh")
+			f.git("commit", "--quiet", "-m", "root")
+			f.git("branch", "-f", "feature", "fresh")
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -213,7 +240,7 @@ func TestRemoteHelperRefusesWhatTheAPICannotSign(t *testing.T) {
 			local := f.rev("feature")
 
 			out, ok := f.push("origin", "feature")
-			if ok || !strings.Contains(out, "sign the commits locally instead") || !strings.Contains(out, remoteHelperDocs) {
+			if ok || !strings.Contains(out, "sign the commits locally") || !strings.Contains(out, remoteHelperDocs) {
 				t.Errorf("expected an actionable rejection, got:\n%s", out)
 			}
 			if f.remoteRev("refs/heads/feature") != "" || f.rev("feature") != local {

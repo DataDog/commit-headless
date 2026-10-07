@@ -28,19 +28,10 @@ const remoteHelperDocs = "https://github.com/DataDog/commit-headless#git-remote-
 
 // headlessPush creates signed copies of changes on top of base and points branch at them,
 // returning the new head. It's a variable so tests can replace GitHub.
-var headlessPush = func(ctx context.Context, target targetFlag, branch, base string, create, force bool, changes []Change) (string, error) {
-	token, err := credentialFor(target)
-	if err != nil {
-		return "", err
-	}
+var headlessPush = func(ctx context.Context, token string, target targetFlag, branch, base string, create, force bool, lease string, changes []Change) (string, error) {
 	client := NewClient(ctx, token, target.Owner(), target.Repository(), branch)
-	client.force = force
 	client.signAttempts = 5
-	if create {
-		if _, err := client.CreateBranch(ctx, base); err != nil {
-			return "", err
-		}
-	}
+	client.createAtEnd, client.force, client.expectedHead = create, force, lease
 	_, head, err := client.PushChanges(ctx, base, changes...)
 	return head, err
 }
@@ -153,14 +144,12 @@ func (h *remoteHelper) option(opt string) string {
 
 // list prints the remote branches and tags, which git uses for up-to-date and fast-forward checks.
 func (h *remoteHelper) list() error {
-	cmd := exec.Command("git", "ls-remote", h.url, "refs/heads/*", "refs/tags/*")
-	cmd.Stderr = h.stderr
-	out, err := cmd.Output()
+	out, err := h.git("ls-remote", h.url, "refs/heads/*", "refs/tags/*")
 	if err != nil {
-		return fmt.Errorf("could not list %s; check that `git ls-remote %s` works (credentials, network): %w", h.url, h.url, err)
+		return fmt.Errorf("%w; check `git ls-remote %s` works (credentials, network)", err, h.url)
 	}
 	h.remoteRefs = map[string]string{}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		sha, ref, ok := strings.Cut(line, "\t")
 		if !ok {
 			continue
@@ -180,7 +169,7 @@ func (h *remoteHelper) push(spec pushSpec) string {
 	newHead, err := h.pushOne(spec)
 	if err != nil {
 		fmt.Fprintf(h.stderr, "headless: %s: %s\n", spec.dst, err)
-		return fmt.Sprintf("error %s %s\n", spec.dst, quoteStatus(err.Error()))
+		return fmt.Sprintf("error %s %q\n", spec.dst, err.Error())
 	}
 	if newHead == "" {
 		return fmt.Sprintf("ok %s\n", spec.dst)
@@ -194,7 +183,8 @@ func (h *remoteHelper) push(spec pushSpec) string {
 // pushed as is.
 func (h *remoteHelper) pushOne(spec pushSpec) (string, error) {
 	old := h.remoteRefs[spec.dst]
-	if expected, ok := h.leases[spec.dst]; ok && expected != old {
+	lease, leased := h.leases[spec.dst]
+	if leased && lease != old {
 		return "", fmt.Errorf("stale info")
 	}
 	if spec.src == "" || !strings.HasPrefix(spec.dst, "refs/heads/") {
@@ -209,106 +199,128 @@ func (h *remoteHelper) pushOne(spec pushSpec) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	unsigned, err := h.anyUnsigned(outgoing)
-	if err != nil {
-		return "", err
-	}
-	if !unsigned {
+	if signed, err := h.allSigned(outgoing); err != nil || signed {
+		if err != nil {
+			return "", err
+		}
 		return "", h.nativePush(spec)
 	}
 
-	base, changes, err := h.headlessChanges(outgoing)
+	token, err := credentialFor(h.target)
 	if err != nil {
 		return "", err
 	}
-	branch := strings.TrimPrefix(spec.dst, "refs/heads/")
-	if h.dryRun {
-		return "", nil
+	base, changes, err := h.headlessChanges(outgoing, isUserToken(token))
+	if err != nil || h.dryRun {
+		return "", err
 	}
-	newHead, err := headlessPush(context.Background(), h.target, branch, base, old == "", spec.force, changes)
+	if !leased {
+		lease = ""
+	}
+	branch := strings.TrimPrefix(spec.dst, "refs/heads/")
+	newHead, err := headlessPush(context.Background(), token, h.target, branch, base, old == "", spec.force || leased, lease, changes)
 	if err != nil {
-		return "", fmt.Errorf("GitHub API push failed, nothing was rewritten locally: %w (see %s)", err, remoteHelperDocs)
+		return "", fmt.Errorf("GitHub API push failed, nothing changed locally: %w (see %s)", err, remoteHelperDocs)
 	}
 	return newHead, h.adoptSigned(spec, local, newHead, len(outgoing))
 }
 
-// outgoing lists the commits reachable from local but from no remote ref, oldest first.
+// outgoing lists the commits reachable from local but from no remote tip, oldest first.
 func (h *remoteHelper) outgoing(local string) ([]string, error) {
+	// Tips we never fetched can't be excluded by rev-list. Fetch those of branches we track (a
+	// moved main, typically) so the remote's own history doesn't look outgoing.
+	tracked, _ := h.git("for-each-ref", "--format=%(refname)", "refs/remotes/"+h.remote+"/")
+	present := h.present()
+	var stale []string
+	for ref, sha := range h.remoteRefs {
+		name, isBranch := strings.CutPrefix(ref, "refs/heads/")
+		if isBranch && !present[sha] && strings.Contains(tracked+"\n", "refs/remotes/"+h.remote+"/"+name+"\n") {
+			stale = append(stale, ref)
+		}
+	}
+	if len(stale) > 0 {
+		if _, err := h.git(append([]string{"fetch", "--quiet", "--no-tags", h.url}, stale...)...); err != nil {
+			return nil, err
+		}
+		present = h.present()
+	}
+
+	exclude := &strings.Builder{}
+	for sha := range present {
+		fmt.Fprintf(exclude, "^%s\n", sha)
+	}
+	out, err := h.gitStdin(exclude.String(), "rev-list", "--reverse", "--stdin", local)
+	return strings.Fields(out), err
+}
+
+// present returns the remote tips that are commits in the local repository.
+func (h *remoteHelper) present() map[string]bool {
 	shas := &strings.Builder{}
 	for _, sha := range h.remoteRefs {
 		fmt.Fprintln(shas, sha)
 	}
-	// Remote tips we haven't fetched are skipped below, so also count what we did fetch, or
-	// commits the remote already has would be recreated.
-	tracking, _ := h.git("for-each-ref", "--format=%(objectname)", "refs/remotes/"+h.remote+"/")
-	fmt.Fprintln(shas, tracking)
-	// Remote commits we never fetched can't be in local history, and rev-list rejects them.
-	check := exec.Command("git", "cat-file", "--batch-check=%(objectname) %(objecttype)")
-	check.Dir, check.Stdin = h.repo.path, strings.NewReader(shas.String())
-	present, err := check.Output()
-	if err != nil {
-		return nil, fmt.Errorf("cat-file: %w", err)
-	}
-	known := &strings.Builder{}
-	for _, line := range strings.Split(string(present), "\n") {
+	out, _ := h.gitStdin(shas.String(), "cat-file", "--batch-check=%(objectname) %(objecttype)")
+	found := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
 		if sha, ok := strings.CutSuffix(line, " commit"); ok {
-			fmt.Fprintf(known, "^%s\n", sha)
+			found[sha] = true
 		}
 	}
-	cmd := exec.Command("git", "rev-list", "--reverse", "--stdin", local)
-	cmd.Dir, cmd.Stdin = h.repo.path, strings.NewReader(known.String())
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("rev-list: %w", err)
-	}
-	return strings.Fields(string(out)), nil
+	return found
 }
 
-func (h *remoteHelper) anyUnsigned(commits []string) (bool, error) {
+func (h *remoteHelper) allSigned(commits []string) (bool, error) {
 	for _, c := range commits {
 		raw, err := h.git("cat-file", "commit", c)
 		if err != nil {
 			return false, err
 		}
-		headers, _, _ := strings.Cut(raw, "\n\n")
-		if !strings.Contains(headers, "\ngpgsig") {
-			return true, nil
+		if headers, _, _ := strings.Cut(raw, "\n\n"); !strings.Contains(headers, "\ngpgsig") {
+			return false, nil
 		}
 	}
-	return false, nil
+	return true, nil
 }
 
 // headlessChanges checks the outgoing commits can be recreated faithfully through the API and
 // returns their base and contents.
-func (h *remoteHelper) headlessChanges(outgoing []string) (string, []Change, error) {
-	signLocally := fmt.Sprintf("sign the commits locally instead (git rebase --exec 'git commit --amend --no-edit -S' <base>) and push again, see %s", remoteHelperDocs)
+func (h *remoteHelper) headlessChanges(outgoing []string, userToken bool) (string, []Change, error) {
+	refuse := func(format string, args ...any) error {
+		return fmt.Errorf(format+"; or sign the commits locally (git commit -S) and push again, see %s", append(args, remoteHelperDocs)...)
+	}
 	base := ""
 	for i, c := range outgoing {
 		parents, err := h.git("rev-list", "--parents", "-n1", c)
 		if err != nil {
 			return "", nil, err
 		}
-		fields := strings.Fields(parents)
-		if len(fields) != 2 {
-			return "", nil, fmt.Errorf("%.12s is a merge or root commit, which GitHub's API can't sign; rebase instead of merging, or %s", c, signLocally)
-		}
-		if i == 0 {
+		switch fields := strings.Fields(parents); {
+		case len(fields) == 1:
+			return "", nil, refuse("%.12s is a root commit, which GitHub's API can't create; start the repository with a commit made on GitHub and rebase onto it", c)
+		case len(fields) > 2:
+			return "", nil, refuse("%.12s is a merge commit, which GitHub's API can't create; rebase instead of merging", c)
+		case i == 0:
 			base = fields[1]
 		}
 	}
 	changes, err := h.repo.Changes(outgoing...)
-	if err != nil {
-		return "", nil, err
+	if err != nil || !userToken {
+		// Other tokens use the REST API for special files, which keeps any mode.
+		return base, changes, err
 	}
 	for _, change := range changes {
 		for path, fe := range change.entries {
-			if fe.Content == nil || fe.Mode == "100644" {
+			if fe.Content == nil {
 				continue
 			}
-			// Editing a file keeps its mode on GitHub; only creating or changing a mode is lost.
-			before, _ := h.git("ls-tree", change.hash+"^", "--", path)
-			if fe.IsSubmodule() || !strings.HasPrefix(before, fe.Mode+" ") {
-				return "", nil, fmt.Errorf("%.12s sets %s to mode %s; GitHub's API only creates regular files, %s", change.hash, path, fe.Mode, signLocally)
+			// With a user token, GitHub keeps a file's existing mode and creates new files as
+			// regular files: any other mode would silently differ.
+			want := "100644"
+			if before, _ := h.git("ls-tree", change.hash+"^", "--", path); before != "" {
+				want, _, _ = strings.Cut(before, " ")
+			}
+			if fe.Mode != want || fe.IsSubmodule() {
+				return "", nil, refuse("%.12s gives %s mode %s, which GitHub's API can't create with a user token", change.hash, path, fe.Mode)
 			}
 		}
 	}
@@ -317,13 +329,13 @@ func (h *remoteHelper) headlessChanges(outgoing []string) (string, []Change, err
 
 // adoptSigned fetches the signed commits and moves the pushed local branch onto them.
 func (h *remoteHelper) adoptSigned(spec pushSpec, local, newHead string, count int) error {
-	if _, err := h.git("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", h.url, spec.dst); err != nil {
-		return fmt.Errorf("pushed %s but could not fetch it: %w; run `git pull --rebase` to sync", newHead, err)
+	if _, err := h.git("fetch", "--quiet", "--no-tags", h.url, spec.dst); err != nil {
+		return fmt.Errorf("pushed %s but could not fetch it (%w); run `git pull --rebase` to sync", newHead, err)
 	}
 	localTree, _ := h.git("rev-parse", local+"^{tree}")
 	signedTree, err := h.git("rev-parse", newHead+"^{tree}")
 	if err != nil || signedTree != localTree {
-		return fmt.Errorf("pushed %s but its content differs from local %.12s; inspect with `git diff %.12s %.12s` (please report: %s)", newHead, local, local, newHead, remoteHelperDocs)
+		return fmt.Errorf("pushed %s but its files differ from local %.12s; compare with `git diff %.12s %.12s` and report it: %s", newHead, local, local, newHead, remoteHelperDocs)
 	}
 
 	ref, _ := h.git("rev-parse", "--symbolic-full-name", spec.src)
@@ -357,23 +369,26 @@ func (h *remoteHelper) nativePush(spec pushSpec) error {
 }
 
 func (h *remoteHelper) git(args ...string) (string, error) {
+	return h.gitStdin("", args...)
+}
+
+// gitStdin runs git, returning its trimmed output or an error carrying its first stderr line.
+func (h *remoteHelper) gitStdin(stdin string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
-	cmd.Dir = h.repo.path
+	cmd.Dir, cmd.Stdin = h.repo.path, strings.NewReader(stdin)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("git %s: %s", args[0], strings.TrimSpace(stderr.String()))
+		first, _, _ := strings.Cut(strings.TrimSpace(stderr.String()), "\n")
+		return "", fmt.Errorf("git %s: %s", args[0], first)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
-// credentialFor returns HEADLESS_TOKEN or the password git's credential helpers hold for the
-// repository, so pushes use the same identity as fetches.
+// credentialFor returns the token git's credential helpers hold for the repository, so pushes
+// use the same identity as fetches.
 func credentialFor(target targetFlag) (string, error) {
-	if token := os.Getenv("HEADLESS_TOKEN"); token != "" {
-		return token, nil
-	}
 	cmd := exec.Command("git", "credential", "fill")
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	cmd.Stdin = strings.NewReader(fmt.Sprintf("protocol=https\nhost=github.com\npath=%s.git\n\n", target))
@@ -383,10 +398,5 @@ func credentialFor(target targetFlag) (string, error) {
 			return password, nil
 		}
 	}
-	return "", fmt.Errorf("no GitHub token for %s: set HEADLESS_TOKEN or configure a git credential helper for https://github.com", target)
-}
-
-// quoteStatus makes a message safe for a single protocol line.
-func quoteStatus(msg string) string {
-	return fmt.Sprintf("%q", strings.ReplaceAll(msg, "\n", " "))
+	return "", fmt.Errorf("no GitHub credentials for %s from `git credential fill`; configure a credential helper for https://github.com, see %s", target, remoteHelperDocs)
 }
