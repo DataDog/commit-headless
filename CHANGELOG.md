@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- **git-remote-headless**: when invoked as `git-remote-headless` (e.g. through a symlink),
+  `commit-headless` acts as a git remote helper so that a plain `git push` lands signed commits and
+  moves the local branch onto them. See the README.
+
 ## v3.0.0
 
 ### Breaking Changes

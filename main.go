@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -110,6 +111,10 @@ type CLI struct {
 }
 
 func main() {
+	if filepath.Base(os.Args[0]) == "git-remote-headless" {
+		os.Exit(remoteHelperMain(os.Args[1:]))
+	}
+
 	logger = NewLogger(os.Stderr)
 
 	cli := CLI{}
