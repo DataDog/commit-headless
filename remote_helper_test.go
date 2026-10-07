@@ -19,6 +19,7 @@ func TestMain(m *testing.M) {
 		headlessPush = func(_ context.Context, _ string, _ targetFlag, branch, base string, _, _ bool, _ string, changes []Change) (string, error) {
 			return fakeGitHubPush(bare, branch, base, changes)
 		}
+		credentialFor = func(string) (string, error) { return "ghu_test", nil }
 		logger = NewLogger(io.Discard)
 		h := &remoteHelper{repo: &Repository{path: "."}, remote: os.Args[1], url: bare, target: "owner/repo", out: os.Stdout, stderr: os.Stderr}
 		if err := h.serve(os.Stdin); err != nil {
@@ -77,7 +78,6 @@ func newHelperFixture(t *testing.T) *helperFixture {
 	f.git("push", "--quiet", "origin", "main") // seed before enabling the helper
 	f.git("fetch", "--quiet", "origin")
 	f.git("config", "url.headless::"+f.bare+".pushInsteadOf", f.bare)
-	f.git("config", "credential.helper", "!f() { echo username=x; echo password=ghu_test; }; f")
 	return f
 }
 

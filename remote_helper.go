@@ -214,7 +214,7 @@ func (h *remoteHelper) pushOne(spec pushSpec) (string, error) {
 		return "", h.nativePush(spec)
 	}
 
-	token, err := credentialFor(h.target)
+	token, err := credentialFor(h.url)
 	if err != nil {
 		return "", err
 	}
@@ -242,14 +242,16 @@ func (h *remoteHelper) outgoing(local string) ([]string, error) {
 	// Remote tips we never fetched can't be excluded. If a tracked branch moved on the remote
 	// (typically main) and our stale copy of it shows up as outgoing, fetch its current tip so
 	// the remote's own history isn't recreated.
-	tracked, _ := h.git("for-each-ref", "--format=%(objectname) %(refname:lstrip=3)", "refs/remotes/"+h.remote+"/")
+	prefix := "refs/remotes/" + h.remote + "/"
+	tracked, _ := h.git("for-each-ref", "--format=%(objectname) %(refname)", prefix)
 	isOutgoing := map[string]bool{}
 	for _, c := range commits {
 		isOutgoing[c] = true
 	}
 	var stale []string
 	for _, line := range strings.Split(tracked, "\n") {
-		sha, name, _ := strings.Cut(line, " ")
+		sha, ref, _ := strings.Cut(line, " ")
+		name := strings.TrimPrefix(ref, prefix)
 		if isOutgoing[sha] && h.remoteRefs["refs/heads/"+name] != "" {
 			stale = append(stale, "refs/heads/"+name)
 		}
@@ -375,9 +377,11 @@ func (h *remoteHelper) adoptSigned(spec pushSpec, local, newHead string, count i
 }
 
 // nativePush pushes a refspec with regular git. An explicit pushurl stops git from applying
-// pushInsteadOf, which would otherwise route this push back to us.
+// pushInsteadOf, which would otherwise route this push back to us; the remote name is random so
+// it can't pick up URLs configured for an existing remote.
 func (h *remoteHelper) nativePush(spec pushSpec) error {
-	args := []string{"-c", "remote.headless-native.url=" + h.url, "-c", "remote.headless-native.pushurl=" + h.url,
+	remote := "headless-native-" + randomSuffix()
+	args := []string{"-c", "remote." + remote + ".url=" + h.url, "-c", "remote." + remote + ".pushurl=" + h.url,
 		"push", "--quiet"}
 	if h.dryRun {
 		args = append(args, "--dry-run")
@@ -387,7 +391,7 @@ func (h *remoteHelper) nativePush(spec pushSpec) error {
 	} else if spec.force {
 		args = append(args, "--force")
 	}
-	_, err := h.git(append(args, "headless-native", spec.src+":"+spec.dst)...)
+	_, err := h.git(append(args, remote, spec.src+":"+spec.dst)...)
 	return err
 }
 
@@ -409,17 +413,17 @@ func (h *remoteHelper) gitStdin(stdin string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// credentialFor returns the token git's credential helpers hold for the repository, so pushes
+// credentialFor returns the token git's credential helpers hold for the remote URL, so pushes
 // use the same identity as fetches.
-func credentialFor(target targetFlag) (string, error) {
+var credentialFor = func(remoteURL string) (string, error) {
 	cmd := exec.Command("git", "credential", "fill")
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	cmd.Stdin = strings.NewReader(fmt.Sprintf("protocol=https\nhost=github.com\npath=%s.git\n\n", target))
+	cmd.Stdin = strings.NewReader("url=" + remoteURL + "\n\n")
 	out, _ := cmd.Output()
 	for _, line := range strings.Split(string(out), "\n") {
 		if password, ok := strings.CutPrefix(line, "password="); ok && password != "" {
 			return password, nil
 		}
 	}
-	return "", fmt.Errorf("no GitHub credentials for %s from `git credential fill`; configure a credential helper for https://github.com, see %s", target, remoteHelperDocs)
+	return "", fmt.Errorf("no GitHub credentials for %s from `git credential fill`; configure a credential helper for https://github.com, see %s", remoteURL, remoteHelperDocs)
 }
