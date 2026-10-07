@@ -227,26 +227,38 @@ func (h *remoteHelper) pushOne(spec pushSpec) (string, error) {
 
 // outgoing lists the commits reachable from local but from no remote tip, oldest first.
 func (h *remoteHelper) outgoing(local string) ([]string, error) {
-	// Tips we never fetched can't be excluded by rev-list. Fetch those of branches we track (a
-	// moved main, typically) so the remote's own history doesn't look outgoing.
-	tracked, _ := h.git("for-each-ref", "--format=%(refname)", "refs/remotes/"+h.remote+"/")
-	present := h.present()
+	commits, err := h.notOnRemote(local)
+	if err != nil {
+		return nil, err
+	}
+	// Remote tips we never fetched can't be excluded. If a tracked branch moved on the remote
+	// (typically main) and our stale copy of it shows up as outgoing, fetch its current tip so
+	// the remote's own history isn't recreated.
+	tracked, _ := h.git("for-each-ref", "--format=%(objectname) %(refname:lstrip=3)", "refs/remotes/"+h.remote+"/")
+	isOutgoing := map[string]bool{}
+	for _, c := range commits {
+		isOutgoing[c] = true
+	}
 	var stale []string
-	for ref, sha := range h.remoteRefs {
-		name, isBranch := strings.CutPrefix(ref, "refs/heads/")
-		if isBranch && !present[sha] && strings.Contains(tracked+"\n", "refs/remotes/"+h.remote+"/"+name+"\n") {
-			stale = append(stale, ref)
+	for _, line := range strings.Split(tracked, "\n") {
+		sha, name, _ := strings.Cut(line, " ")
+		if isOutgoing[sha] && h.remoteRefs["refs/heads/"+name] != "" {
+			stale = append(stale, "refs/heads/"+name)
 		}
 	}
-	if len(stale) > 0 {
-		if _, err := h.git(append([]string{"fetch", "--quiet", "--no-tags", h.url}, stale...)...); err != nil {
-			return nil, err
-		}
-		present = h.present()
+	if len(stale) == 0 {
+		return commits, nil
 	}
+	if _, err := h.git(append([]string{"fetch", "--quiet", "--no-tags", h.url}, stale...)...); err != nil {
+		return nil, err
+	}
+	return h.notOnRemote(local)
+}
 
+// notOnRemote lists commits reachable from local but from no remote tip present locally.
+func (h *remoteHelper) notOnRemote(local string) ([]string, error) {
 	exclude := &strings.Builder{}
-	for sha := range present {
+	for sha := range h.present() {
 		fmt.Fprintf(exclude, "^%s\n", sha)
 	}
 	out, err := h.gitStdin(exclude.String(), "rev-list", "--reverse", "--stdin", local)
@@ -355,7 +367,7 @@ func (h *remoteHelper) adoptSigned(spec pushSpec, local, newHead string, count i
 // pushInsteadOf, which would otherwise route this push back to us.
 func (h *remoteHelper) nativePush(spec pushSpec) error {
 	args := []string{"-c", "remote.headless-native.url=" + h.url, "-c", "remote.headless-native.pushurl=" + h.url,
-		"push", "--quiet", "--no-verify"}
+		"push", "--quiet"}
 	if h.dryRun {
 		args = append(args, "--dry-run")
 	}

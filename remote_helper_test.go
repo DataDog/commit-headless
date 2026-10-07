@@ -39,7 +39,7 @@ func fakeGitHubPush(bare, branch, head string, changes []Change) (string, error)
 		return strings.TrimSpace(string(out)), err
 	}
 	for _, c := range changes {
-		if out, err := run(os.Getenv("GIT_DIR"), "push", "--quiet", "--no-verify", bare, c.hash+":refs/fake/objects"); err != nil {
+		if out, err := run(os.Getenv("GIT_DIR"), "push", "--quiet", bare, c.hash+":refs/fake/objects"); err != nil {
 			return "", fmt.Errorf("%s", out)
 		}
 		next, err := run(bare, "commit-tree", c.hash+"^{tree}", "-p", head, "-m", c.message)
