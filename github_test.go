@@ -546,6 +546,55 @@ func TestPushChanges(t *testing.T) {
 		}
 	})
 
+	t.Run("createAtEnd and expectedHead", func(t *testing.T) {
+		for name, tc := range map[string]struct {
+			create   bool
+			expected string
+			want     string // last ref write, or error substring
+		}{
+			"creates the branch only once commits exist": {create: true, want: "POST refs/heads/test-branch"},
+			"lease holds":  {expected: "remote-head", want: "PATCH heads/test-branch"},
+			"lease broken": {expected: "other", want: "stale info"},
+		} {
+			t.Run(name, func(t *testing.T) {
+				var writes []string
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					switch {
+					case r.Method == http.MethodGet:
+						json.NewEncoder(w).Encode(github.Branch{Commit: &github.RepositoryCommit{SHA: github.Ptr("remote-head")}})
+					case r.Method == http.MethodPost:
+						var req github.CreateRef
+						json.NewDecoder(r.Body).Decode(&req)
+						writes = append(writes, "POST "+req.Ref)
+						w.WriteHeader(http.StatusCreated)
+						json.NewEncoder(w).Encode(github.Reference{Object: &github.GitObject{SHA: github.Ptr("x")}})
+					case r.Method == http.MethodPatch:
+						writes = append(writes, "PATCH "+strings.TrimPrefix(r.URL.Path, "/repos/test-owner/test-repo/git/refs/"))
+						json.NewEncoder(w).Encode(github.Reference{Object: &github.GitObject{SHA: github.Ptr("x")}})
+					default:
+						w.WriteHeader(http.StatusNoContent)
+					}
+				}))
+				defer server.Close()
+				client := newTestClient(t, server)
+				client.createAtEnd, client.expectedHead, client.force = tc.create, tc.expected, tc.expected != ""
+				client.graphql = &mockGraphQL{handler: func(string, map[string]any) (json.RawMessage, error) {
+					return signedGraphQLResponse("new"), nil
+				}}
+
+				_, _, err := client.PushChanges(context.Background(), "base", Change{hash: "h", message: "m", entries: map[string]FileEntry{"a": newFileEntry([]byte("a"))}})
+				got := fmt.Sprint(err)
+				if err == nil {
+					got = writes[len(writes)-1]
+				}
+				if !strings.Contains(got, tc.want) {
+					t.Errorf("got %q, want %q (writes %v)", got, tc.want, writes)
+				}
+			})
+		}
+	})
+
 	t.Run("rest fallback advances throwaway branch", func(t *testing.T) {
 		var updatedRefs []string
 

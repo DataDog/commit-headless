@@ -22,6 +22,7 @@ tags.
 - [push](#push) - Push local commits to the remote as signed commits
 - [commit](#commit) - Create a signed commit from staged changes
 - [replay](#replay) - Re-sign existing remote commits
+- [git-remote-headless](#git-remote-headless) - Make plain `git push` produce signed commits
 
 All commands require:
 - A target repository: `--target/-T owner/repo`
@@ -165,6 +166,40 @@ Basic usage:
 
 **Warning:** This command force-pushes to the remote branch. The `--since` commit must be an
 ancestor of the branch HEAD.
+
+## git-remote-headless
+
+On machines without a signing key (remote workspaces, agents), `commit-headless` can sit behind a
+plain `git push`. Install it as a [git remote helper][remote-helpers] and route pushes to it:
+
+    ln -s "$(command -v commit-headless)" ~/.local/bin/git-remote-headless   # any directory on PATH
+    git config --global url.headless::https://github.com/.pushInsteadOf https://github.com/
+
+Fetches are unaffected. On push, outgoing unsigned commits are recreated through the GitHub API,
+which signs them, and the local branch is moved onto the signed commits. Their trees are identical,
+so the index and working tree are untouched. Git prints one line describing the rewrite:
+
+    headless: GitHub signed 2 commit(s) on feature, 769485b -> 6b77472; feature rewritten to match (same files)
+
+The remote-tracking ref (`origin/feature`) records the signed commit, so `git status` stays in sync.
+Already-signed commits, deletions, tags and branch moves that create no commits are pushed with
+regular git. `--force`, `--force-with-lease`, `--dry-run` and `-u` work as usual.
+
+The token comes from the git credential helper configured for the repository, so pushes use the
+same identity as fetches. A new branch is created only once its signed commits exist.
+`--force-with-lease` is re-checked right before the forced update; GitHub offers no atomic
+compare-and-swap for forced updates, so a concurrent push landing in between that last check and
+the update would be overwritten, as with `commit-headless push --force`.
+
+With a user token, GitHub keeps a modified file's existing mode and creates new files as regular
+files. Pushes that would need anything else (new executables, symlinks or submodules, mode changes),
+merge commits, or a root commit are refused before anything is written, with a message suggesting a
+rebase or signing the commits locally (`git commit -S`). After a push, the signed tree is compared
+with the local one before the local branch is moved.
+
+Other local refs pointing at the old commits (stacked branches, tags) are not rewritten.
+
+[remote-helpers]: https://git-scm.com/docs/gitremote-helpers
 
 ## Signature verification
 

@@ -105,6 +105,12 @@ type Client struct {
 	dryrun       bool
 	force        bool
 	signAttempts int
+
+	// createAtEnd creates the branch only once its commits exist, so a failed push leaves none.
+	createAtEnd bool
+	// expectedHead is re-checked right before a forced update (--force-with-lease). GitHub has
+	// no compare-and-swap for forced ref updates, so this narrows the race to one API call.
+	expectedHead string
 }
 
 // NewClient returns a Client configured to make GitHub requests for branch owned by owner/repo on
@@ -250,6 +256,19 @@ func (c *Client) PushChanges(ctx context.Context, headCommit string, changes ...
 		}
 
 		headCommit = newHead
+	}
+
+	if c.createAtEnd {
+		// Creating a ref fails if it already exists, which makes this atomic.
+		if _, _, err := c.git.CreateRef(ctx, c.owner, c.repo, github.CreateRef{Ref: "refs/heads/" + c.branch, SHA: headCommit}); err != nil {
+			return len(changes), "", fmt.Errorf("create branch: %w", err)
+		}
+		return len(changes), headCommit, nil
+	}
+	if c.expectedHead != "" {
+		if current, err := c.GetHeadCommitHash(ctx); err != nil || current != c.expectedHead {
+			return len(changes), "", fmt.Errorf("stale info: remote %s moved to %s (err: %v)", c.branch, current, err)
+		}
 	}
 
 	// Update the real branch
