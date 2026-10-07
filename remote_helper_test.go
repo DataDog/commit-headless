@@ -188,6 +188,53 @@ func TestRemoteHelperIgnoresStaleTrackingRefs(t *testing.T) {
 	}
 }
 
+func TestRemoteHelperBatchEdgeCases(t *testing.T) {
+	t.Run("one commit to two branches is signed once", func(t *testing.T) {
+		f := newHelperFixture(t)
+		f.git("checkout", "--quiet", "-b", "feature")
+		f.commit("one")
+		if out, ok := f.push("origin", "feature:a", "feature:b"); !ok || strings.Count(out, "signed 1 commit(s)") != 1 {
+			t.Fatalf("expected a single rewrite:\n%s", out)
+		}
+		signed := f.rev("feature")
+		for _, ref := range []string{"refs/heads/a", "refs/heads/b"} {
+			if got := f.remoteRev(ref); got != signed {
+				t.Errorf("%s = %s, want %s", ref, got, signed)
+			}
+		}
+		if gitReportsNewOid() && (f.rev("origin/a") != signed || f.rev("origin/b") != signed) {
+			t.Errorf("tracking refs must record the signed commit")
+		}
+	})
+
+	t.Run("lease that the branch must not exist", func(t *testing.T) {
+		f := newHelperFixture(t)
+		f.git("checkout", "--quiet", "-b", "feature")
+		f.commit("one")
+		if out, ok := f.push("--force-with-lease=refs/heads/fresh:", "origin", "feature:fresh"); !ok {
+			t.Fatalf("an absent branch satisfies an empty lease:\n%s", out)
+		}
+	})
+
+	t.Run("directory replaced by a regular file", func(t *testing.T) {
+		f := newHelperFixture(t)
+		requireNoError(t, os.MkdirAll(filepath.Join(f.root, "x"), 0o755))
+		requireNoError(t, os.WriteFile(filepath.Join(f.root, "x", "y"), []byte("y\n"), 0o644))
+		f.git("add", "x")
+		f.git("commit", "--quiet", "-m", "dir")
+		requireNoError(t, exec.Command("git", "--git-dir", f.bare, "fetch", "--quiet", f.root, "main:main").Run())
+		f.git("fetch", "--quiet", "origin")
+		f.git("checkout", "--quiet", "-b", "feature")
+		f.git("rm", "--quiet", "-r", "x")
+		requireNoError(t, os.WriteFile(filepath.Join(f.root, "x"), []byte("now a file\n"), 0o644))
+		f.git("add", "x")
+		f.git("commit", "--quiet", "-m", "file")
+		if out, ok := f.push("origin", "feature"); !ok || !strings.Contains(out, "signed 1 commit(s)") {
+			t.Fatalf("a new regular file replacing a directory should be signed:\n%s", out)
+		}
+	})
+}
+
 func TestRemoteHelperForceWithLease(t *testing.T) {
 	f := newHelperFixture(t)
 	f.git("checkout", "--quiet", "-b", "feature")

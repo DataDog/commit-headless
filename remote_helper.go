@@ -39,6 +39,7 @@ var headlessPush = func(ctx context.Context, token string, target targetFlag, br
 type pushSpec struct {
 	src, dst string
 	force    bool
+	local    string // src resolved before the batch runs, since pushes move local refs
 }
 
 type remoteHelper struct {
@@ -50,6 +51,7 @@ type remoteHelper struct {
 	stderr     io.Writer
 	remoteRefs map[string]string
 	leases     map[string]string
+	signed     map[string]string // local commit -> its signed copy, pushed earlier in this batch
 	dryRun     bool
 }
 
@@ -105,6 +107,11 @@ func (h *remoteHelper) serve(in io.Reader) error {
 			src, dst, _ := strings.Cut(strings.TrimPrefix(line, "push "), ":")
 			batch = append(batch, pushSpec{src: strings.TrimPrefix(src, "+"), dst: dst, force: strings.HasPrefix(src, "+")})
 		case line == "" && batch != nil:
+			for i := range batch {
+				if batch[i].src != "" {
+					batch[i].local, _ = h.git("rev-parse", "--verify", batch[i].src+"^{commit}")
+				}
+			}
 			for _, spec := range batch {
 				fmt.Fprint(h.out, h.push(spec))
 			}
@@ -134,6 +141,9 @@ func (h *remoteHelper) option(opt string) string {
 		ref, expected, _ := strings.Cut(value, ":")
 		if h.leases == nil {
 			h.leases = map[string]string{}
+		}
+		if strings.Trim(expected, "0") == "" {
+			expected = "" // git sends the zero OID for "must not exist"
 		}
 		h.leases[ref] = expected
 	default:
@@ -199,9 +209,14 @@ func (h *remoteHelper) pushOne(spec pushSpec) (string, error) {
 		return "", h.nativePush(spec)
 	}
 
-	local, err := h.git("rev-parse", "--verify", spec.src+"^{commit}")
-	if err != nil {
-		return "", err
+	local := spec.local
+	if local == "" {
+		return "", fmt.Errorf("%s is not a commit", spec.src)
+	}
+	if signed, ok := h.signed[local]; ok {
+		// The same commit went to another branch earlier in this push: reuse its signed copy.
+		spec.src = signed
+		return signed, h.nativePush(spec)
 	}
 	outgoing, err := h.outgoing(local)
 	if err != nil {
@@ -230,6 +245,10 @@ func (h *remoteHelper) pushOne(spec pushSpec) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("GitHub API push failed, nothing changed locally: %w (see %s)", err, remoteHelperDocs)
 	}
+	if h.signed == nil {
+		h.signed = map[string]string{}
+	}
+	h.signed[local] = newHead
 	return newHead, h.adoptSigned(spec, local, newHead, len(outgoing))
 }
 
@@ -338,8 +357,10 @@ func (h *remoteHelper) headlessChanges(outgoing []string, userToken bool) (strin
 			// With a user token, GitHub keeps a file's existing mode and creates new files as
 			// regular files: any other mode would silently differ.
 			want := "100644"
-			if before, _ := h.git("ls-tree", change.hash+"^", "--", path); before != "" {
-				want, _, _ = strings.Cut(before, " ")
+			// "<mode> <type> <sha>\t<path>"; a directory replaced by a file counts as new.
+			before, _ := h.git("ls-tree", change.hash+"^", "--", path)
+			if fields := strings.Fields(before); len(fields) > 1 && fields[1] != "tree" {
+				want = fields[0]
 			}
 			if fe.Mode != want || fe.IsSubmodule() {
 				return "", nil, refuse("%.12s gives %s mode %s, which GitHub's API can't create with a user token", change.hash, path, fe.Mode)
