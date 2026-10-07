@@ -171,12 +171,20 @@ func (h *remoteHelper) push(spec pushSpec) string {
 		fmt.Fprintf(h.stderr, "headless: %s: %s\n", spec.dst, err)
 		return fmt.Sprintf("error %s %q\n", spec.dst, err.Error())
 	}
-	if newHead == "" {
+	if newHead == "" || !gitReportsNewOid() {
 		return fmt.Sprintf("ok %s\n", spec.dst)
 	}
 	// Tell git the remote branch now points at the signed commit, so it records that in the
 	// remote-tracking ref instead of the local commit it pushed.
 	return fmt.Sprintf("ok %s\noption new-oid %s\n", spec.dst, newHead)
+}
+
+// gitReportsNewOid reports whether git accepts "option new-oid" from helpers (git >= 2.29).
+func gitReportsNewOid() bool {
+	out, _ := exec.Command("git", "version").Output()
+	var major, minor int
+	fmt.Sscanf(string(out), "git version %d.%d", &major, &minor)
+	return major > 2 || (major == 2 && minor >= 29)
 }
 
 // pushOne returns the new remote head when commits were rewritten, or "" when the refspec was
@@ -352,10 +360,13 @@ func (h *remoteHelper) adoptSigned(spec pushSpec, local, newHead string, count i
 
 	ref, _ := h.git("rev-parse", "--symbolic-full-name", spec.src)
 	moved := "local commits left unchanged"
+	if !gitReportsNewOid() {
+		moved = "git < 2.29: run `git fetch` to update the remote-tracking ref; " + moved
+	}
 	if strings.HasPrefix(ref, "refs/heads/") || ref == "HEAD" {
 		// Compare-and-swap: never move a ref that changed while we were pushing.
 		if _, err := h.git("update-ref", "--no-deref", "-m", "push: re-signed by GitHub", ref, newHead, local); err == nil {
-			moved = fmt.Sprintf("%s rewritten to match (same files)", strings.TrimPrefix(ref, "refs/heads/"))
+			moved = strings.Replace(moved, "local commits left unchanged", strings.TrimPrefix(ref, "refs/heads/")+" rewritten to match (same files)", 1)
 		}
 	}
 	fmt.Fprintf(h.stderr, "headless: GitHub signed %d commit(s) on %s, %.7s -> %.7s; %s\n",

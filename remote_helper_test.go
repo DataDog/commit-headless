@@ -127,7 +127,7 @@ func TestRemoteHelperRewritesUnsignedCommits(t *testing.T) {
 	if got := f.rev("feature"); got != signed {
 		t.Errorf("local feature = %s, want %s", got, signed)
 	}
-	if got := f.rev("origin/feature"); got != signed {
+	if got := f.rev("origin/feature"); got != signed && gitReportsNewOid() {
 		t.Errorf("origin/feature = %s, want %s", got, signed)
 	}
 	if got := string(f.git("status", "--porcelain")); strings.TrimSpace(got) != "M one" {
@@ -194,6 +194,9 @@ func TestRemoteHelperForceWithLease(t *testing.T) {
 	f.commit("one")
 	if out, ok := f.push("-u", "origin", "feature"); !ok {
 		t.Fatalf("push failed:\n%s", out)
+	}
+	if !gitReportsNewOid() {
+		f.git("fetch", "--quiet", "origin") // as the push notice asks on git < 2.29
 	}
 	f.git("commit", "--quiet", "--amend", "-m", "one, amended")
 
