@@ -22,6 +22,7 @@ tags.
 - [push](#push) - Push local commits to the remote as signed commits
 - [commit](#commit) - Create a signed commit from staged changes
 - [replay](#replay) - Re-sign existing remote commits
+- [git-remote-headless](#git-remote-headless) - Make plain `git push` produce signed commits
 
 All commands require:
 - A target repository: `--target/-T owner/repo`
@@ -165,6 +166,27 @@ Basic usage:
 
 **Warning:** This command force-pushes to the remote branch. The `--since` commit must be an
 ancestor of the branch HEAD.
+
+## git-remote-headless
+
+On machines that can't always sign commits (remote workspaces, agents), `commit-headless` can sit
+behind a plain `git push` as a [git remote helper][remote-helpers]:
+
+    ln -s "$(command -v commit-headless)" ~/.local/bin/git-remote-headless   # any directory on PATH
+    git config --global url.headless::https://github.com/.pushInsteadOf https://github.com/
+
+Signed commits, tags and deletions are pushed with regular git. Outgoing unsigned commits are
+recreated through the GitHub API, which signs them, and the local branch is moved onto the signed
+copies. Their trees are identical, so the index and working tree are untouched:
+
+    headless: GitHub signed 2 commit(s) on feature, 769485b -> 6b77472; moved feature onto them (same files)
+
+The token comes from `git credential fill` for the remote URL. `--force`, `--force-with-lease` and
+`-u` work, git itself refuses `--dry-run` and `--atomic`. Merge and root commits are refused. If a
+signed tree differs from the local one (with a user token GitHub creates new executables and
+symlinks as regular files), the branch is left untouched. Requires git 2.29+.
+
+[remote-helpers]: https://git-scm.com/docs/gitremote-helpers
 
 ## Signature verification
 

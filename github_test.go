@@ -546,6 +546,41 @@ func TestPushChanges(t *testing.T) {
 		}
 	})
 
+	t.Run("expected tree", func(t *testing.T) {
+		for tree, want := range map[string]string{"tree-sha": "", "other": "branch left untouched"} {
+			var updated bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/git/commits/"):
+					json.NewEncoder(w).Encode(github.Commit{Tree: &github.Tree{SHA: github.Ptr("tree-sha")}})
+				case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/heads/test-branch"):
+					updated = true
+					json.NewEncoder(w).Encode(github.Reference{Object: &github.GitObject{SHA: github.Ptr("x")}})
+				case r.Method == http.MethodPost:
+					w.WriteHeader(http.StatusCreated)
+					json.NewEncoder(w).Encode(github.Reference{Object: &github.GitObject{SHA: github.Ptr("x")}})
+				default:
+					w.WriteHeader(http.StatusNoContent)
+				}
+			}))
+			client := newTestClient(t, server)
+			client.expectedTree = tree
+			client.graphql = &mockGraphQL{handler: func(string, map[string]any) (json.RawMessage, error) {
+				return signedGraphQLResponse("new"), nil
+			}}
+
+			_, _, err := client.PushChanges(context.Background(), "base", Change{hash: "h", message: "m", entries: map[string]FileEntry{"a": newFileEntry([]byte("a"))}})
+			server.Close()
+			if want == "" && (err != nil || !updated) {
+				t.Errorf("tree %s: want the branch updated, got %v", tree, err)
+			}
+			if want != "" && (err == nil || !strings.Contains(err.Error(), want) || updated) {
+				t.Errorf("tree %s: want %q and no update, got %v (updated %v)", tree, want, err, updated)
+			}
+		}
+	})
+
 	t.Run("rest fallback advances throwaway branch", func(t *testing.T) {
 		var updatedRefs []string
 

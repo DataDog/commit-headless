@@ -105,6 +105,9 @@ type Client struct {
 	dryrun       bool
 	force        bool
 	signAttempts int
+
+	// expectedTree, when set, must match the last commit's tree before the branch is touched.
+	expectedTree string
 }
 
 // NewClient returns a Client configured to make GitHub requests for branch owned by owner/repo on
@@ -250,6 +253,14 @@ func (c *Client) PushChanges(ctx context.Context, headCommit string, changes ...
 		}
 
 		headCommit = newHead
+	}
+
+	if c.expectedTree != "" {
+		commit, _, err := c.git.GetCommit(ctx, c.owner, c.repo, headCommit)
+		if err != nil || commit.GetTree().GetSHA() != c.expectedTree {
+			return len(changes), "", fmt.Errorf("signed commit %s has different files than the local commit (tree %s, want %s, err: %v); branch left untouched",
+				headCommit, commit.GetTree().GetSHA(), c.expectedTree, err)
+		}
 	}
 
 	// Update the real branch
