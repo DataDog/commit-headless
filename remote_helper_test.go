@@ -35,9 +35,6 @@ func fakeGitHubPush(bare string) func(context.Context, string, targetFlag, strin
 			return strings.TrimSpace(string(out)), err
 		}
 		for _, c := range changes {
-			if out, err := git("fetch", "--quiet", os.Getenv("GIT_DIR"), c.hash); err != nil {
-				return "", fmt.Errorf("%s", out)
-			}
 			next, err := git("commit-tree", c.hash+"^{tree}", "-p", head, "-m", c.message)
 			if err != nil {
 				return "", fmt.Errorf("%s", next)
@@ -57,6 +54,13 @@ type helperRepo struct {
 // newHelperRepo returns a repository on branch feature, whose origin is a bare repository with a
 // main branch, and whose pushes go through git-remote-headless.
 func newHelperRepo(t *testing.T) *helperRepo {
+	var major, minor int
+	out, _ := exec.Command("git", "version").Output()
+	fmt.Sscanf(string(out), "git version %d.%d", &major, &minor)
+	if major == 2 && minor < 29 {
+		t.Skip("git-remote-headless needs git 2.29+ (option new-oid)")
+	}
+
 	bin := t.TempDir()
 	requireNoError(t, os.Symlink(os.Args[0], filepath.Join(bin, "git-remote-headless")))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -67,6 +71,8 @@ func newHelperRepo(t *testing.T) *helperRepo {
 
 	r := &helperRepo{testRepository: testRepo(t), bare: filepath.Join(t.TempDir(), "remote.git")}
 	requireNoError(t, exec.Command("git", "init", "--quiet", "--bare", r.bare).Run())
+	// The fake GitHub reads local objects directly, as if they had been uploaded.
+	requireNoError(t, os.WriteFile(filepath.Join(r.bare, "objects", "info", "alternates"), []byte(r.path(".git", "objects")), 0o644))
 	r.git("remote", "add", "origin", r.bare)
 	r.commit("base")
 	r.git("branch", "-M", "main")
